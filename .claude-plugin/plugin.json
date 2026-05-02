@@ -1,7 +1,7 @@
 {
   "name": "product-backlog",
-  "description": "Maintain a per-project Product Backlog (docs/backlog/product-backlog.md) by analyzing each Claude session for shipped, in-progress, and pending work.",
-  "version": "0.1.0",
+  "description": "Maintain a per-project Product Backlog (docs/backlog/product-backlog.md) plus a self-contained HTML dashboard, by analyzing each Claude session for shipped, in-progress, and pending work.",
+  "version": "0.2.0",
   "author": {
     "name": "photoenthu"
   },

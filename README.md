@@ -1,8 +1,8 @@
 # product-backlog-skill
 
-A Claude Code skill that maintains a per-project **Product Backlog** in `docs/backlog/product-backlog.md` by analyzing each Claude session for shipped, in-progress, and pending work.
+A Claude Code skill that maintains a per-project **Product Backlog** in `docs/backlog/product-backlog.md` — plus a self-contained HTML dashboard for browsing it — by analyzing each Claude session for shipped, in-progress, and pending work.
 
-The point: when you finish a session — or check in mid-session — you say "update the backlog" and the skill reconciles what you actually did against what's tracked. It looks at git commits, plans, PRDs, opportunities-marked-DONE, and the conversation itself, then adds or updates rows in a single status-grouped markdown table. No external tooling, no SaaS, no per-project setup beyond invoking the skill once.
+The point: when you finish a session — or check in mid-session — you say "update the backlog" and the skill reconciles what you actually did against what's tracked. It looks at git commits, plans, PRDs, opportunities-marked-DONE, and the conversation itself, then adds or updates rows in a single status-grouped markdown table. After writing, it offers to commit and push both files to git. No external tooling, no SaaS, no per-project setup beyond invoking the skill once.
 
 ## What it produces
 
@@ -61,6 +61,35 @@ What it does, in order:
 6. **Asks clarifying questions** when an inference is ambiguous, one question at a time.
 7. Shows a brief proposed-changes summary and waits for confirmation.
 8. Writes targeted edits (never a full file overwrite) and verifies the table is well-formed.
+9. Ensures `docs/backlog/product-backlog.html` is in sync — written on first run, re-copied only when the bundled template's version is bumped.
+10. Asks whether to commit and push both files. Stages by explicit path so unrelated dirty files in your working tree are left alone.
+
+## HTML dashboard
+
+Alongside the markdown, the skill bootstraps a single-file HTML dashboard at `docs/backlog/product-backlog.html`. Open it in any modern browser, click **Open file…**, point it at your `product-backlog.md`, and you get:
+
+- Three sections (In-Progress / Pending / Shipped) matching the markdown.
+- Count badges (e.g. `2 In-Progress · 3 Pending · 7 Shipped · 12 Total`).
+- A single search box that filters across id, title, summary, notes, and artifacts.
+- Clickable artifact links and inline commit hashes.
+- Light/dark mode that follows your OS setting.
+- Zero CDN dependencies — fully offline.
+
+In Chrome / Edge / Brave / Arc / any Chromium-based browser, the dashboard remembers your file via the [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_Access_API) (the handle is stored in IndexedDB). Reload the page and it renders immediately — the only time you'll re-pick is if you explicitly click **Change file**. Firefox and Safari don't support persistent file handles, so they fall back to a one-shot file picker each visit; the dashboard still works, just without the "remember me" affordance.
+
+The HTML is **never bundled with data**. It always reads the live markdown from your machine, which means:
+
+- The dashboard never goes stale.
+- The skill doesn't regenerate it on every run — only when the bundled template's version changes (a `<!-- product-backlog-dashboard-version: N -->` comment near the top of the file gates this).
+- You can edit the markdown manually between Claude sessions and the dashboard reflects the change on the next refresh.
+
+## Commit-and-push prompt
+
+After writing the markdown (and regenerating the HTML if needed), the skill asks:
+
+> Commit and push `docs/backlog/product-backlog.md` (and `product-backlog.html` if it was created/regenerated) to git? **(yes / skip)**
+
+`yes` stages **only** the backlog files (explicit `git add <path>`, never `-A` or `.`), commits with a one-line message describing the row-level changes, and pushes. `skip` leaves the files modified in the working tree for you to handle later.
 
 ## Install
 
@@ -108,8 +137,10 @@ product-backlog-skill/
 ├── skills/
 │   └── product-backlog/
 │       ├── SKILL.md
-│       └── scripts/
-│           └── backlog_helper.py
+│       ├── scripts/
+│       │   └── backlog_helper.py
+│       └── templates/
+│           └── product-backlog.html      # the dashboard template
 ├── LICENSE
 └── README.md
 ```

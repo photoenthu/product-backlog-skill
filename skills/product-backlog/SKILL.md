@@ -1,6 +1,6 @@
 ---
 name: product-backlog
-description: Maintain a per-project Product Backlog table in `<project>/docs/backlog/product-backlog.md`. Trigger on `/product-backlog`, "update the backlog", "log this to the backlog", "add to product backlog", "track this for later", or at the end of a session that shipped/planned features when the user says "log progress" or "update product backlog". Analyzes the current Claude session — git commits made, plans/PRDs written, opportunities marked DONE, things the user said about future work — and adds/updates rows in a status-grouped markdown table (In-Progress → Pending → Shipped). Use this even when the user just says "remember to ship X next week" or "track this initiative" since those are pending-backlog signals. Each row is atomic (one shippable unit), updated in-place across sessions, with stable BL-NNN ids, immutable summaries, and append-only artifact links. Do not invoke for one-off notes or todos that aren't shippable features.
+description: Maintain a per-project Product Backlog table in `<project>/docs/backlog/product-backlog.md` plus an accompanying `product-backlog.html` dashboard. Trigger on `/product-backlog`, "update the backlog", "log this to the backlog", "add to product backlog", "track this for later", or at the end of a session that shipped/planned features when the user says "log progress" or "update product backlog". Analyzes the current Claude session — git commits made, plans/PRDs written, opportunities marked DONE, things the user said about future work — and adds/updates rows in a status-grouped markdown table (In-Progress → Pending → Shipped). Use this even when the user just says "remember to ship X next week" or "track this initiative" since those are pending-backlog signals. Each row is atomic (one shippable unit), updated in-place across sessions, with stable BL-NNN ids, immutable summaries, and append-only artifact links. After updating, ensures the HTML dashboard is in sync (only regenerated when the template version bumps) and asks whether to commit + push the backlog files. Do not invoke for one-off notes or todos that aren't shippable features.
 ---
 
 # Product Backlog
@@ -163,9 +163,87 @@ After all edits, re-read the file once and visually verify:
 
 If any check fails, fix it before reporting success.
 
-### 8. Report what changed
+### 8. Regenerate the HTML dashboard if the bundled template is newer
 
-End with a one-line summary: `Updated docs/backlog/product-backlog.md: 2 shipped, 1 in-progress, 2 new pending.` Don't restate the diff in full — the user already saw it in step 6.
+After writing the markdown, ensure the dashboard at `docs/backlog/product-backlog.html` is in sync with the skill's bundled template:
+
+```bash
+python3 "$SKILL_DIR/scripts/backlog_helper.py" regenerate-html-if-stale "$ROOT/docs/backlog/product-backlog.html"
+```
+
+The helper prints one of three outcomes:
+
+- `created: <path>` — the HTML didn't exist; first-time write.
+- `regenerated: <path>` — the file existed but its embedded version was older than the bundled template.
+- `unchanged: <path>` — the on-disk version matches the template; no write happened.
+
+The user does **not** see a confirmation prompt for this step in the routine `unchanged` case. When `created` or `regenerated`, mention it in the final report (step 10) so the user knows their dashboard file moved.
+
+The HTML reads the markdown live via the browser. It does **not** need to be regenerated when the markdown changes — only when the template's structure changes (a `created` or `regenerated` outcome happens at most once per template version bump).
+
+### 9. Ask whether to commit and push
+
+After all writes are done, surface this prompt **once** at the end:
+
+> Commit and push `docs/backlog/product-backlog.md` (and `product-backlog.html` if it was created/regenerated) to git? **(yes / skip)**
+
+Behavior on each answer:
+
+- **yes** — Stage **only** the backlog files by explicit path (never `git add .` or `-A`, even if the working tree has other dirty files):
+  ```bash
+  git add docs/backlog/product-backlog.md
+  # plus the HTML, only if step 8 returned created or regenerated
+  git add docs/backlog/product-backlog.html
+  git commit -m "<message>"
+  git push
+  ```
+  The commit message should be **one line**, concise, and describe the row-level changes — e.g. `chore(backlog): mark BL-007 shipped, add BL-013` or `chore(backlog): bootstrap product backlog dashboard`. Do not include the AI-attribution footer for these commits — they're routine bookkeeping.
+- **skip** — leave the files modified in the working tree. Do not stash, do not stage. The user will commit them later (or not).
+
+Two refinements:
+
+1. **If the working tree has unrelated dirty files**, that's fine — staging by explicit path means we won't pull them in. Don't warn the user about unrelated changes; that's not the skill's job.
+2. **If the cwd isn't a git repo** (rare — the user's project structure usually puts a backlog inside a repo), skip the prompt entirely with a one-line note: `Not a git repo; commit/push skipped.`
+
+### 10. Report what changed
+
+End with a one-line summary: `Updated docs/backlog/product-backlog.md: 2 shipped, 1 in-progress, 2 new pending. Dashboard: unchanged. Committed e1d3bfb.` Don't restate the diff in full — the user already saw it in step 6.
+
+## HTML dashboard
+
+The skill bundles a single-file HTML dashboard at `templates/product-backlog.html`. On every invocation, the skill copies it into the project's `docs/backlog/product-backlog.html` if (and only if) the bundled template's version exceeds the on-disk version. The version is a single integer in an HTML comment near the top of the file:
+
+```html
+<!-- product-backlog-dashboard-version: 1 -->
+```
+
+When the skill author edits the bundled template in a way that should trigger users to re-fetch (changed columns, fixed parser bug, new feature), they bump this integer. Otherwise it stays put — most skill updates won't touch the dashboard.
+
+### What the dashboard does
+
+The HTML is **never bundled with data**. On first load, the user clicks "Open file…" and picks `product-backlog.md` from their machine. The browser's [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_Access_API) returns a persistent `FileSystemFileHandle`, which the page stores in IndexedDB. On subsequent visits the page restores the handle automatically — no re-pick needed unless the browser has revoked permission, in which case a single click re-grants it.
+
+The dashboard:
+
+- Renders three sections (In-Progress / Pending / Shipped) matching the markdown's structure.
+- Shows count badges and a single search box that filters across id / title / summary / notes / artifacts.
+- Renders artifact cells with clickable links and inline-code commit hashes.
+- Is fully self-contained — no CDN, no external CSS, no external JS. Works offline.
+- Honors the OS's light/dark color scheme via `prefers-color-scheme`.
+
+### Browser compatibility
+
+| Browser | Persistent handle | Behavior |
+|---|---|---|
+| Chrome, Edge, Brave, Arc, Opera, other Chromium | ✅ | Pick once, reload, dashboard renders. |
+| Safari | ❌ | Falls back to `<input type="file">`. User picks each visit; no IndexedDB persistence. Dashboard still works. |
+| Firefox | ❌ | Same fallback as Safari. |
+
+The fallback path is automatic — no code branch the user has to opt into. The "Last opened: X (re-open to refresh)" label appears in the header so the user knows what file the dashboard expects.
+
+### Why store the handle in IndexedDB and not localStorage
+
+`FileSystemFileHandle` objects are not strings — `localStorage` only takes strings. IndexedDB serializes them via the structured-clone algorithm. localStorage is still used for the human-readable filename (so the header can say "Last opened: product-backlog.md") since that's plain text and useful even in fallback browsers.
 
 ## Examples
 
@@ -214,6 +292,9 @@ End with a one-line summary: `Updated docs/backlog/product-backlog.md: 2 shipped
 - **Don't write status into a column.** Section *is* status. A `Status` column would create two sources of truth that can drift.
 - **Don't fail silently if the table is malformed.** If parsing finds a row with the wrong number of cells, surface it to the user before writing — don't paper over it.
 - **Don't invoke this skill for one-off todos.** A backlog row is a *shippable unit*, not a chore. "Update the docstring on `foo()`" is not a backlog row; "Refactor the foo subsystem" is.
+- **Don't regenerate the HTML on every invocation.** It's the bundled template's version that gates regeneration, not the markdown's content. Re-copying the HTML each run would make the diff noisy and cause spurious git churn.
+- **Don't `git add .` or `git add -A` in the commit step.** Stage the backlog files by explicit path. Other dirty files in the working tree are not the skill's concern.
+- **Don't auto-commit without asking.** The commit/push prompt is mandatory — even if the user said "yes, push" earlier in the conversation about something else, the backlog commit needs its own confirmation. Cheap to confirm, expensive to push the wrong thing.
 
 ## Why this skill exists
 
