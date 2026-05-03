@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Product Backlog</title>
-<!-- product-backlog-dashboard-version: 1 -->
+<!-- product-backlog-dashboard-version: 3 -->
 <style>
   :root {
     color-scheme: light dark;
@@ -301,6 +301,7 @@
   const DB_NAME = "product-backlog";
   const DB_STORE = "handles";
   const DB_KEY = "current";
+  const DIR_KEY = "rootDir";
   const LS_NAME = "product-backlog:filename";
 
   const els = {
@@ -322,8 +323,27 @@
 
   const supportsFSAccess = "showOpenFilePicker" in window;
 
+  // The dashboard lives at <project>/docs/backlog/product-backlog.html, so
+  // the project root is two directories up. Relative links inside the
+  // markdown (e.g. `docs/specs/foo.md`) are written relative to the project
+  // root, not to docs/backlog/, so we resolve them against this base.
+  const PROJECT_ROOT = (() => {
+    try { return new URL("../../", window.location.href).href; }
+    catch (_) { return null; }
+  })();
+
+  function resolveLinkUrl(url) {
+    if (!url) return url;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return url;
+    if (url.startsWith("//") || url.startsWith("#")) return url;
+    if (!PROJECT_ROOT) return url;
+    try { return new URL(url, PROJECT_ROOT).href; }
+    catch (_) { return url; }
+  }
+
   let currentRows = [];
   let currentFilter = "";
+  let projectDirHandle = null;
 
   // ---------- IndexedDB helpers (for FileSystemFileHandle) ----------
   function openDb() {
@@ -442,6 +462,26 @@
     }[c]));
   }
 
+  // Build an <a> for a (text, url) pair. Absolute URLs (PR links etc.) get a
+  // plain target="_blank" anchor. Relative URLs additionally carry a
+  // data-rel-href attribute that the delegated click handler uses to fetch
+  // the file via the FileSystemDirectoryHandle (so Chrome can open .md
+  // artifacts from a file:// dashboard without per-click pickers).
+  function isAbsoluteUrl(url) {
+    if (!url) return true;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return true;
+    if (url.startsWith("//") || url.startsWith("#")) return true;
+    return false;
+  }
+  function makeAnchorHtml(rawUrl, rawText) {
+    const safeText = escapeHtml(rawText);
+    if (isAbsoluteUrl(rawUrl)) {
+      return `<a href="${escapeHtml(rawUrl)}" target="_blank" rel="noopener">${safeText}</a>`;
+    }
+    const fallback = resolveLinkUrl(rawUrl);
+    return `<a href="${escapeHtml(fallback)}" data-rel-href="${escapeHtml(rawUrl)}" target="_blank" rel="noopener">${safeText}</a>`;
+  }
+
   // Render artifact cell: handles `[text](url)`, `` `code` ``, and bare text
   // pieces separated by ` | ` (the un-escaped pipes that appear after we
   // already split the table cells using \|-aware splitter).
@@ -450,7 +490,7 @@
     const parts = cell.split(/\s*\|\s*/);
     return parts.map((part) => {
       const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-      if (link) return `<a href="${escapeHtml(link[2])}" target="_blank" rel="noopener">${escapeHtml(link[1])}</a>`;
+      if (link) return makeAnchorHtml(link[2], link[1]);
       const code = part.match(/^`([^`]+)`$/);
       if (code) return `<code>${escapeHtml(code[1])}</code>`;
       return `<span>${escapeHtml(part)}</span>`;
@@ -459,15 +499,305 @@
 
   function renderInline(cell) {
     if (!cell) return "";
-    // Replace <br> placeholder with a newline marker for display.
     const withBreaks = cell.replace(/<br\s*\/?>/gi, "\n");
-    // Process inline backticks then markdown links.
-    let html = escapeHtml(withBreaks);
-    html = html.replace(/`([^`]+)`/g, (_, code) => `<code>${code}</code>`);
-    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, url) =>
-      `<a href="${url}" target="_blank" rel="noopener">${text}</a>`);
+    // Pull out links and code spans before escaping so URLs and code bodies
+    // don't get HTML-mangled (e.g. & in a query string becoming &amp;amp;).
+    const links = [];
+    const codes = [];
+    let s = withBreaks
+      .replace(/`([^`]+)`/g, (_, code) => {
+        codes.push(code);
+        return `IC${codes.length - 1}`;
+      })
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, url) => {
+        links.push({ text, url });
+        return `LK${links.length - 1}`;
+      });
+    let html = escapeHtml(s);
+    html = html.replace(/LK(\d+)/g, (_, i) => makeAnchorHtml(links[+i].url, links[+i].text));
+    html = html.replace(/IC(\d+)/g, (_, i) => `<code>${escapeHtml(codes[+i])}</code>`);
     html = html.replace(/\n/g, "<br>");
     return html;
+  }
+
+  // ---------- In-place file open via FileSystemDirectoryHandle ----------
+  // Chrome blocks <a href="file://..."> navigation from a file:// dashboard.
+  // To open spec/plan markdown in a new window without that, the user grants
+  // a one-time directory handle for the project root; we walk it to the
+  // linked file, read bytes, and open them as a Blob URL. The picker is only
+  // shown the first time a relative link is clicked (or after a permission
+  // revocation). Non-Chromium browsers fall through to the plain anchor.
+
+  async function walkToFile(rootHandle, relPath) {
+    const segments = relPath.split("/").filter((s) => s && s !== ".");
+    let current = rootHandle;
+    for (let i = 0; i < segments.length - 1; i++) {
+      current = await current.getDirectoryHandle(segments[i]);
+    }
+    return current.getFileHandle(segments[segments.length - 1]);
+  }
+
+  // ---------- Markdown viewer ----------
+  // Minimal block-level Markdown → HTML renderer aimed at typical plan/PRD
+  // content (headings, paragraphs, lists, fenced code, GFM tables, blockquotes,
+  // hr, inline code/bold/italic/links). Not CommonMark-strict; intentionally
+  // small. Files that aren't .md open as plain text in the new window.
+
+  const VIEWER_CSS = `
+    :root {
+      color-scheme: light dark;
+      --bg: #fafaf9; --fg: #1c1917; --fg-muted: #57534e;
+      --border: #e7e5e4; --accent: #3b82f6; --code-bg: #f5f5f4;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0c0a09; --fg: #fafaf9; --fg-muted: #a8a29e;
+              --border: #292524; --code-bg: #292524; }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                   "Helvetica Neue", Arial, sans-serif;
+      font-size: 15px; line-height: 1.6; }
+    .viewer-header { padding: 10px 24px; border-bottom: 1px solid var(--border);
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+      font-size: 12px; color: var(--fg-muted); position: sticky; top: 0;
+      background: var(--bg); z-index: 1; }
+    main { padding: 32px; max-width: 820px; margin: 0 auto; }
+    h1, h2, h3, h4, h5, h6 { line-height: 1.3; margin: 1.6em 0 0.6em;
+      font-weight: 600; }
+    h1 { font-size: 28px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+    h2 { font-size: 22px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+    h3 { font-size: 18px; }
+    h4 { font-size: 16px; }
+    h5, h6 { font-size: 14px; color: var(--fg-muted); }
+    p { margin: 0 0 1em; }
+    code { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+      font-size: 0.88em; background: var(--code-bg); padding: 1px 6px;
+      border-radius: 4px; }
+    pre { background: var(--code-bg); padding: 14px 16px; border-radius: 8px;
+      overflow-x: auto; margin: 0 0 1em; }
+    pre code { background: transparent; padding: 0; font-size: 0.85em; }
+    blockquote { border-left: 3px solid var(--border); margin: 0 0 1em;
+      padding: 0.2em 1em; color: var(--fg-muted); }
+    ul, ol { padding-left: 1.6em; margin: 0 0 1em; }
+    li { margin: 0.2em 0; }
+    li > ul, li > ol { margin: 0.2em 0; }
+    hr { border: none; border-top: 1px solid var(--border); margin: 2em 0; }
+    table { border-collapse: collapse; margin: 0 0 1em; width: 100%; font-size: 14px; }
+    th, td { border: 1px solid var(--border); padding: 6px 12px;
+      text-align: left; vertical-align: top; }
+    th { background: var(--code-bg); font-weight: 600; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    img { max-width: 100%; }
+    input[type="checkbox"] { margin-right: 6px; }
+  `;
+
+  function renderInlineMd(text) {
+    // Pull out code spans and links before escaping (same trick as renderInline).
+    const codes = [];
+    const links = [];
+    let s = text
+      .replace(/`([^`]+)`/g, (_, code) => {
+        codes.push(code);
+        return `IC${codes.length - 1}`;
+      })
+      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
+        // Image: render as <img>. URL stays raw; resolved via the same
+        // resolver so relative image paths work too (in the dashboard
+        // context — the viewer popup is a Blob URL so file:// paths won't
+        // load images, but absolute http URLs will).
+        return `IM${alt}${url}`;
+      })
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, txt, url) => {
+        links.push({ txt, url });
+        return `LK${links.length - 1}`;
+      });
+    s = escapeHtml(s);
+    // Bold / italic. Bold first so the inner * doesn't get eaten by italic.
+    s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+    s = s.replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,;:!?]|$)/g, "$1<em>$2</em>");
+    s = s.replace(/(^|[\s(])_([^_\n]+)_(?=[\s).,;:!?]|$)/g, "$1<em>$2</em>");
+    // Restore.
+    s = s.replace(/IM([^]*)([^]+)/g,
+      (_, alt, url) => `<img alt="${escapeHtml(alt)}" src="${escapeHtml(url)}">`);
+    s = s.replace(/LK(\d+)/g, (_, i) => makeAnchorHtml(links[+i].url, links[+i].text || links[+i].txt));
+    s = s.replace(/IC(\d+)/g, (_, i) => `<code>${escapeHtml(codes[+i])}</code>`);
+    return s;
+  }
+
+  function splitMarkdownTableRow(line) {
+    const cells = [];
+    let buf = "";
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === "\\" && line[i + 1] === "|") { buf += "|"; i++; continue; }
+      if (c === "|") { cells.push(buf); buf = ""; continue; }
+      buf += c;
+    }
+    cells.push(buf);
+    if (cells.length && cells[0].trim() === "") cells.shift();
+    if (cells.length && cells[cells.length - 1].trim() === "") cells.pop();
+    return cells.map((s) => s.trim());
+  }
+
+  function renderMdTable(lines) {
+    const header = splitMarkdownTableRow(lines[0]);
+    const body = lines.slice(2).map(splitMarkdownTableRow);
+    let html = "<table><thead><tr>";
+    for (const h of header) html += `<th>${renderInlineMd(h)}</th>`;
+    html += "</tr></thead><tbody>";
+    for (const row of body) {
+      html += "<tr>";
+      for (let i = 0; i < header.length; i++) {
+        html += `<td>${renderInlineMd(row[i] || "")}</td>`;
+      }
+      html += "</tr>";
+    }
+    html += "</tbody></table>";
+    return html;
+  }
+
+  function renderMdList(lines, ordered) {
+    const re = ordered ? /^(\s*)\d+\.\s+(.*)$/ : /^(\s*)[-*+]\s+(.*)$/;
+    // Group items at the top indent level; deeper-indented continuations get
+    // appended to the current item.
+    const items = [];
+    let baseIndent = null;
+    for (const line of lines) {
+      if (line.trim() === "") {
+        if (items.length) items[items.length - 1] += "\n";
+        continue;
+      }
+      const m = line.match(re);
+      if (m && (baseIndent === null || m[1].length === baseIndent)) {
+        if (baseIndent === null) baseIndent = m[1].length;
+        // Render checkbox shorthand `[ ]` / `[x]` at the start of an item.
+        const body = m[2].replace(/^\[([ xX])\]\s+/, (_, ch) => {
+          const checked = ch.toLowerCase() === "x";
+          return `<input type="checkbox" disabled${checked ? " checked" : ""}> `;
+        });
+        items.push(body);
+      } else if (items.length) {
+        items[items.length - 1] += "\n" + line;
+      }
+    }
+    const tag = ordered ? "ol" : "ul";
+    const renderItem = (raw) => {
+      // If the item has nested list lines, recurse on those.
+      const sub = raw.split("\n");
+      const lead = sub[0];
+      const rest = sub.slice(1);
+      const isListLine = (l) => /^\s*[-*+]\s+/.test(l) || /^\s*\d+\.\s+/.test(l);
+      const nestedStart = rest.findIndex((l) => isListLine(l) && /^\s+/.test(l));
+      if (nestedStart === -1) {
+        return `<li>${renderInlineMd(raw.replace(/\n/g, " "))}</li>`;
+      }
+      const head = [lead, ...rest.slice(0, nestedStart)].filter(Boolean).join(" ");
+      const nested = rest.slice(nestedStart);
+      const nestedOrdered = /^\s*\d+\.\s+/.test(nested[0]);
+      return `<li>${renderInlineMd(head)}${renderMdList(nested, nestedOrdered)}</li>`;
+    };
+    return `<${tag}>${items.map(renderItem).join("")}</${tag}>`;
+  }
+
+  function renderMdBlock(block) {
+    if (!block.trim()) return "";
+    // Pass-through for fence placeholders so they don't get wrapped in <p>.
+    if (/^\x01?FENCE\d+\x01?$/.test(block.trim())) return block.trim();
+    const lines = block.split("\n");
+    const first = lines[0];
+    const heading = first.match(/^(#{1,6})\s+(.*?)\s*#*\s*$/);
+    if (heading && lines.length === 1) {
+      const level = heading[1].length;
+      return `<h${level}>${renderInlineMd(heading[2])}</h${level}>`;
+    }
+    if (lines.length === 1 && /^\s*([-*_])\s*\1\s*\1[-*_\s]*$/.test(first)) {
+      return "<hr>";
+    }
+    if (lines.every((l) => /^>\s?/.test(l) || l.trim() === "")) {
+      const inner = lines.map((l) => l.replace(/^>\s?/, "")).join("\n");
+      return `<blockquote>${renderMdBlocks(inner)}</blockquote>`;
+    }
+    if (lines.length >= 2 && /\|/.test(lines[0]) &&
+        /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[1]) && /-/.test(lines[1])) {
+      return renderMdTable(lines);
+    }
+    if (lines.every((l) => /^\s*[-*+]\s+/.test(l) || /^\s+\S/.test(l) || l.trim() === "")) {
+      return renderMdList(lines, false);
+    }
+    if (lines.every((l) => /^\s*\d+\.\s+/.test(l) || /^\s+\S/.test(l) || l.trim() === "")) {
+      return renderMdList(lines, true);
+    }
+    return `<p>${renderInlineMd(lines.join(" "))}</p>`;
+  }
+
+  function renderMdBlocks(text) {
+    // Extract fenced code blocks first so internal blank lines don't split them.
+    const fences = [];
+    const stripped = text.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_, lang, body) => {
+      fences.push({ lang: lang.trim(), body: body.replace(/\n$/, "") });
+      return `FENCE${fences.length - 1}`;
+    });
+    const blocks = stripped.split(/\n{2,}/);
+    let html = blocks.map((b) => renderMdBlock(b.replace(/\s+$/, ""))).filter(Boolean).join("\n");
+    html = html.replace(/FENCE(\d+)/g, (_, i) => {
+      const { lang, body } = fences[+i];
+      const cls = lang ? ` class="lang-${escapeHtml(lang)}"` : "";
+      return `<pre><code${cls}>${escapeHtml(body)}</code></pre>`;
+    });
+    return html;
+  }
+
+  function buildViewerHtml(filename, body, isMarkdown) {
+    const safeTitle = escapeHtml(filename);
+    const main = isMarkdown ? renderMdBlocks(body) : `<pre>${escapeHtml(body)}</pre>`;
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">` +
+      `<meta name="viewport" content="width=device-width,initial-scale=1">` +
+      `<title>${safeTitle}</title><base target="_blank">` +
+      `<style>${VIEWER_CSS}</style></head><body>` +
+      `<div class="viewer-header">${safeTitle}</div>` +
+      `<main>${main}</main></body></html>`;
+  }
+
+  function openArtifactInNewWindow(filename, text) {
+    const isMd = /\.(md|markdown)$/i.test(filename);
+    const payload = isMd ? buildViewerHtml(filename, text, true) : text;
+    const type = isMd ? "text/html;charset=utf-8" : "text/plain;charset=utf-8";
+    const blob = new Blob([payload], { type });
+    const url = URL.createObjectURL(blob);
+    const win = window.open(url, "_blank");
+    if (!win) showError("Pop-up was blocked. Allow pop-ups for this page to view files.");
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
+
+  async function handleArtifactLinkClick(e) {
+    if (!supportsFSAccess) return;
+    const a = e.target.closest && e.target.closest("a[data-rel-href]");
+    if (!a) return;
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+    const rel = a.dataset.relHref;
+    if (!rel) return;
+    e.preventDefault();
+    try {
+      if (!projectDirHandle) {
+        projectDirHandle = await window.showDirectoryPicker({
+          id: "product-backlog-root",
+          mode: "read",
+        });
+        dbSet(DIR_KEY, projectDirHandle).catch(() => {});
+      } else if (!(await ensurePermission(projectDirHandle))) {
+        showError("Permission to read the project root was denied.");
+        return;
+      }
+      const fileHandle = await walkToFile(projectDirHandle, rel);
+      const file = await fileHandle.getFile();
+      const text = await file.text();
+      openArtifactInNewWindow(file.name, text);
+    } catch (err) {
+      if (err && err.name === "AbortError") return;
+      showError(`Could not open ${rel}: ${err && err.message ? err.message : err}`);
+    }
   }
 
   // ---------- Rendering ----------
@@ -635,15 +965,27 @@
       // Stale handle, schema mismatch, etc. — just fall back to open flow.
       console.warn("Session restore skipped:", e);
     }
+    // Restore the project-root directory handle if we have one. We do not
+    // call requestPermission here (no user gesture); ensurePermission will
+    // run on the first link click.
+    try {
+      const dir = await dbGet(DIR_KEY);
+      if (dir) projectDirHandle = dir;
+    } catch (e) {
+      console.warn("Directory handle restore skipped:", e);
+    }
   }
 
   // ---------- Wire up ----------
   els.openBtn.addEventListener("click", pickAndLoad);
   els.changeBtn.addEventListener("click", async () => {
     await dbDelete(DB_KEY);
+    await dbDelete(DIR_KEY);
+    projectDirHandle = null;
     localStorage.removeItem(LS_NAME);
     await pickAndLoad();
   });
+  document.addEventListener("click", handleArtifactLinkClick);
   els.refreshBtn.addEventListener("click", async () => {
     if (!supportsFSAccess) {
       // No persisted handle; re-prompt.
