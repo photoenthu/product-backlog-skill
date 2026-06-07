@@ -41,6 +41,7 @@
       --code-bg: #292524;
       --priority-critical-bg: #450a0a; --priority-high-bg: #431407;
       --priority-medium-bg: #172554; --priority-low-bg: #1f2937;
+      --priority-low: #9ca3af;
     }
   }
   * { box-sizing: border-box; }
@@ -541,6 +542,7 @@
   }
   function makeAnchorHtml(rawUrl, rawText) {
     const safeText = escapeHtml(rawText);
+    if (/^\s*javascript:/i.test(rawUrl)) return safeText;
     if (isAbsoluteUrl(rawUrl)) {
       return `<a href="${escapeHtml(rawUrl)}" target="_blank" rel="noopener">${safeText}</a>`;
     }
