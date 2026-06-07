@@ -455,6 +455,31 @@
     return sections;
   }
 
+  // <parseFeatureCell>
+  // Split a Feature cell into its title, optional priority, and optional
+  // dependency bullets. The cell looks like:
+  //   "Title **(High)**<br>• Dependency on BL-007<br>• Cannot Start Before: …"
+  // Returns { title, priority|null, dependencies:[] }. Pure; unit-tested in
+  // tests/parse_feature_cell.test.mjs via the sentinel markers around it.
+  function parseFeatureCell(cell) {
+    const segments = String(cell || "").split(/<br\s*\/?>/i);
+    let title = (segments[0] || "").trim();
+    const dependencies = [];
+    for (let i = 1; i < segments.length; i++) {
+      const seg = segments[i].trim();
+      if (!seg) continue;
+      dependencies.push(seg.replace(/^•\s*/, "").trim());
+    }
+    let priority = null;
+    const pm = title.match(/\*\*\(\s*(Critical|High|Medium|Low)\s*\)\*\*/i);
+    if (pm) {
+      priority = pm[1].charAt(0).toUpperCase() + pm[1].slice(1).toLowerCase();
+      title = title.replace(pm[0], "").trim();
+    }
+    return { title, priority, dependencies };
+  }
+  // </parseFeatureCell>
+
   // ---------- Inline markdown rendering ----------
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({
