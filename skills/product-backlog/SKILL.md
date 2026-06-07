@@ -180,8 +180,8 @@ Before writing, print a **brief, scannable summary** of what's about to change. 
 Proposed updates to docs/backlog/product-backlog.md:
   • BL-007 "Regime-Router v1": Pending → Shipped (commit e1d3bfb appended)
   • BL-009 "vwap_reclaim_long Phase 2.1": In-Progress → Shipped (commits 597718d, aa27a4a appended)
-  • BL-012 (new) "Dashboard Observability v3": Pending — plan only, no commits yet
-  • BL-013 (new) "Scanner universe expansion": Pending — referenced in this session as future work
+  • BL-012 (new) "Dashboard Observability v3": Pending, Medium — plan only, no commits yet
+  • BL-013 (new) "Scanner universe expansion": Pending, High — depends on BL-007
 
 Confirm to write? (yes / edit)
 ```
