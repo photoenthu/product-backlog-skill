@@ -132,6 +132,14 @@ helper script, or any existing row.
   before.
 - The markdown remains a valid 7-column GFM table; GitHub renders the `<br>` and
   `•` bullets natively in the Feature cell.
+- **Parser leniency:** `parseFeatureCell` treats *every* non-empty post-`<br>`
+  segment as a dependency (stripping a leading `•` if present), rather than
+  requiring the `•` marker. This is harmless for skill-generated rows (which
+  always emit `•`) and more robust to hand edits.
+- **Multi-line legacy titles:** if any pre-existing row used `<br>` inside its
+  Feature cell to wrap a title, the second line now renders inside the dependency
+  block rather than the title. The text is relocated, not lost. The skill has
+  never produced multi-line Feature titles, so this is a theoretical edge only.
 
 ## Testing / verification
 
