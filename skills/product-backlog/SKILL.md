@@ -48,7 +48,7 @@ A row lives in **exactly one** section. The section header *is* the status — t
 | Column | Rule |
 |---|---|
 | **ID** | `BL-NNN`, zero-padded to 3 digits. Stable, never reused. Identifies the row across status transitions. Compute the next ID with `python3 <skill-dir>/scripts/backlog_helper.py next-id <path-to-backlog>` — this scans the whole file and returns `max + 1`. Always use the helper; do not eyeball the next ID. |
-| **Feature** | Short title, ideally <60 chars. Reads like a PR title or ticket name. Avoid trailing periods. |
+| **Feature** | Short title, ideally <60 chars. Reads like a PR title or ticket name. Avoid trailing periods. For new Pending/In-Progress rows, append the derived priority as `**(Critical\|High\|Medium\|Low)**` and any dependency bullets — see "Priority & dependencies" below. |
 | **Summary** | 2-3 lines describing what it is and why it matters. **Immutable once written.** If the framing of the work later shifts materially, prefer adding a new follow-up row over rewriting history — the table is partly a historical record. |
 | **Created (ET)** | `YYYY-MM-DD HH:MM ET`. Set once when the row is added. Get the current timestamp with `python3 <skill-dir>/scripts/backlog_helper.py now-et`. Always use this helper; do not infer the timezone from `date` or shell vars, since both can mislead on a non-ET machine. |
 | **Last updated (ET)** | Same format. Touched whenever any field on the row changes (status, artifacts, notes). |
@@ -58,6 +58,48 @@ A row lives in **exactly one** section. The section header *is* the status — t
 ### Markdown table escaping
 
 The `\|` literal pipe is required inside any cell that contains pipes (the "Artifacts" column will commonly need this). The pipe in the column separator is a real `|`; the pipe inside content is `\|`. If a cell contains a newline, replace it with `<br>`. If a cell contains a backtick, fence it with double-backticks `` `` `` to avoid breaking the table.
+
+### Priority & dependencies (Feature cell)
+
+New **Pending** and **In-Progress** rows carry a derived priority and optional
+dependency facts **inside the Feature cell**, after the title, `<br>`-separated:
+
+```
+<Title> **(<Priority>)**<br>• Dependency on BL-NNN<br>• Cannot Start Before: YYYY-MM-DD ET<br>• Reason for dependency: <note>
+```
+
+- **Priority** is exactly one of `Critical | High | Medium | Low`, bold, in
+  parentheses, appended after the title with one leading space. Derived for
+  Pending/In-Progress rows only — **not** for rows logged as already Shipped.
+- The three dependency bullets are **each optional**; emit only those that apply.
+  A row with no dependency is just `<Title> **(<Priority>)**` (no bullets).
+- Bullet char is a literal `•` + space. Labels are fixed:
+  `Dependency on `, `Cannot Start Before: `, `Reason for dependency: `.
+- `Reason for dependency` is one freeform sentence (may cover a BL dependency, a
+  gating event, or both). Escape any literal `|` as `\|`.
+- Priority is set at creation; not auto-recomputed, but may be revised on
+  explicit user request (touch `Last updated (ET)` when revised).
+
+**Priority rubric** (use judgment):
+
+- **Critical** — blocks shipping/users now; a correctness, security, or
+  data-loss risk; or other in-progress work is stuck on it.
+- **High** — clear near-term value or unblocks multiple items; expected this
+  cycle.
+- **Medium** — worth doing, no urgency. **Default** when signals are mixed.
+- **Low** — nice-to-have, speculative, or explicitly deferred.
+
+**Dependency derivation** — when adding a new Pending/In-Progress row, check:
+
+- **BL dependency** — does it need another backlog row shipped first? →
+  `Dependency on BL-NNN` (confirm the id exists via `list-ids`).
+- **Gating event** — blocked on a soak window, external launch, approval, or
+  upstream release? → state it in `Reason for dependency`.
+- **Earliest start date** — a derivable "not before" date? →
+  `Cannot Start Before: YYYY-MM-DD ET` (use `now-et` as the reference clock).
+
+If a dependency is plausible but ambiguous, ask it as a clarifying question
+(step 5) rather than guessing. If none apply, write no bullets.
 
 ## When the skill is invoked
 
@@ -143,6 +185,8 @@ Proposed updates to docs/backlog/product-backlog.md:
 
 Confirm to write? (yes / edit)
 ```
+
+Include the derived **priority** and any **dependency** facts for new Pending/In-Progress rows in this summary, so the user can override before anything is written — e.g. `BL-013 (new) "Scanner universe expansion": Pending, High — depends on BL-007`.
 
 Only proceed if the user confirms. If they say "edit", let them course-correct row-by-row before writing.
 
@@ -295,6 +339,8 @@ The fallback path is automatic — no code branch the user has to opt into. The 
 - **Don't regenerate the HTML on every invocation.** It's the bundled template's version that gates regeneration, not the markdown's content. Re-copying the HTML each run would make the diff noisy and cause spurious git churn.
 - **Don't `git add .` or `git add -A` in the commit step.** Stage the backlog files by explicit path. Other dirty files in the working tree are not the skill's concern.
 - **Don't auto-commit without asking.** The commit/push prompt is mandatory — even if the user said "yes, push" earlier in the conversation about something else, the backlog commit needs its own confirmation. Cheap to confirm, expensive to push the wrong thing.
+- **Don't assign priority to Shipped rows.** Priority informs sequencing of unfinished work; it's moot once a row is Shipped. Only Pending/In-Progress rows get a `**(Priority)**` tag.
+- **Don't invent dependencies.** Only record a `Dependency on BL-NNN` when the id actually exists and the blocking relationship is real. If unsure, ask rather than guess.
 
 ## Why this skill exists
 
