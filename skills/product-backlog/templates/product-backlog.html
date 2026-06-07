@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Product Backlog</title>
-<!-- product-backlog-dashboard-version: 3 -->
+<!-- product-backlog-dashboard-version: 4 -->
 <style>
   :root {
     color-scheme: light dark;
@@ -22,6 +22,10 @@
     --shipped: #10b981;
     --shipped-bg: #d1fae5;
     --code-bg: #f5f5f4;
+    --priority-critical: #dc2626; --priority-critical-bg: #fee2e2;
+    --priority-high: #ea580c; --priority-high-bg: #ffedd5;
+    --priority-medium: #2563eb; --priority-medium-bg: #dbeafe;
+    --priority-low: #6b7280; --priority-low-bg: #f3f4f6;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -35,6 +39,8 @@
       --pending-bg: #1e1b4b;
       --shipped-bg: #022c22;
       --code-bg: #292524;
+      --priority-critical-bg: #450a0a; --priority-high-bg: #431407;
+      --priority-medium-bg: #172554; --priority-low-bg: #1f2937;
     }
   }
   * { box-sizing: border-box; }
@@ -226,6 +232,41 @@
     font-style: italic;
     margin-top: 6px;
   }
+  .row .priority {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 8px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    vertical-align: middle;
+  }
+  .row .priority.critical { color: var(--priority-critical); background: var(--priority-critical-bg); }
+  .row .priority.high { color: var(--priority-high); background: var(--priority-high-bg); }
+  .row .priority.medium { color: var(--priority-medium); background: var(--priority-medium-bg); }
+  .row .priority.low { color: var(--priority-low); background: var(--priority-low-bg); }
+  .row .dependencies {
+    grid-column: 2;
+    margin-top: 6px;
+    padding-left: 0;
+    list-style: none;
+    font-size: 12px;
+    color: var(--fg-muted);
+  }
+  .row .dependencies li {
+    margin: 2px 0;
+    padding-left: 14px;
+    position: relative;
+  }
+  .row .dependencies li::before {
+    content: "•";
+    position: absolute;
+    left: 0;
+    color: var(--fg-subtle);
+  }
   .row .status-pill {
     align-self: start;
   }
@@ -243,7 +284,7 @@
   @media (max-width: 640px) {
     main { padding: 16px; }
     .row { grid-template-columns: 1fr; }
-    .row .summary, .row .meta, .row .artifacts, .row .notes { grid-column: 1; }
+    .row .summary, .row .meta, .row .artifacts, .row .notes, .row .dependencies { grid-column: 1; }
   }
 </style>
 </head>
@@ -539,6 +580,7 @@
         return `LK${links.length - 1}`;
       });
     let html = escapeHtml(s);
+    html = html.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
     html = html.replace(/LK(\d+)/g, (_, i) => makeAnchorHtml(links[+i].url, links[+i].text));
     html = html.replace(/IC(\d+)/g, (_, i) => `<code>${escapeHtml(codes[+i])}</code>`);
     html = html.replace(/\n/g, "<br>");
@@ -853,12 +895,21 @@
       } else {
         section.classList.remove("empty");
       }
-      container.innerHTML = rows.map((r) => `
+      container.innerHTML = rows.map((r) => {
+        const fc = parseFeatureCell(r.feature);
+        const pill = fc.priority
+          ? `<span class="priority ${fc.priority.toLowerCase()}">${escapeHtml(fc.priority)}</span>`
+          : "";
+        const deps = fc.dependencies.length
+          ? `<ul class="dependencies">${fc.dependencies.map((d) => `<li>${renderInline(d)}</li>`).join("")}</ul>`
+          : "";
+        return `
         <div class="row">
           <div class="id">${escapeHtml(r.id)}</div>
           <div>
-            <div class="title">${renderInline(r.feature)}</div>
+            <div class="title">${renderInline(fc.title)}${pill}</div>
             <div class="summary">${renderInline(r.summary)}</div>
+            ${deps}
             <div class="meta">
               <span><strong>Created:</strong> ${escapeHtml(r.created)}</span>
               <span><strong>Updated:</strong> ${escapeHtml(r.updated)}</span>
@@ -866,8 +917,8 @@
             ${r.artifacts ? `<div class="artifacts">${renderArtifacts(r.artifacts)}</div>` : ""}
             ${r.notes ? `<div class="notes">${renderInline(r.notes)}</div>` : ""}
           </div>
-        </div>
-      `).join("");
+        </div>`;
+      }).join("");
     }
   }
 
