@@ -39,5 +39,14 @@ assert.deepEqual(legacy.dependencies, []);
 const lc = parseFeatureCell("Thing **(critical)** ");
 assert.equal(lc.priority, "Critical");
 assert.equal(lc.title, "Thing");
+assert.deepEqual(lc.dependencies, []);
+
+// Empty / null input must not throw and yields empty fields.
+for (const empty of ["", null, undefined]) {
+  const r = parseFeatureCell(empty);
+  assert.equal(r.title, "");
+  assert.equal(r.priority, null);
+  assert.deepEqual(r.dependencies, []);
+}
 
 console.log("parse_feature_cell: all assertions passed");
