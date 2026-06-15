@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Product Backlog</title>
-<!-- product-backlog-dashboard-version: 4 -->
+<!-- product-backlog-dashboard-version: 5 -->
 <style>
   :root {
     color-scheme: light dark;
@@ -483,6 +483,12 @@
       }
       if (!headerSeen && cells[0] && /^id$/i.test(cells[0])) {
         headerSeen = true;
+        // Begin the table at the header row, not the separator. A valid GFM
+        // table has header -> separator -> data, but the separator can drift
+        // (inserted rows displace it) or go missing entirely. Requiring it
+        // here silently drops every data row above the separator. Tolerating
+        // its absence keeps the dashboard honest when the markdown drifts.
+        inTable = true;
         continue;
       }
       if (!inTable) continue;

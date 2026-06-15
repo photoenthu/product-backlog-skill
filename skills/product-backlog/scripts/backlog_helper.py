@@ -9,6 +9,9 @@ subtly wrong in prose:
   * `next-id <md-path>`               — next free `BL-NNN` id by scanning the file
   * `init <md-path>`                  — create the empty markdown file if missing
   * `list-ids <md-path>`              — print every existing id, one per line
+  * `validate <md-path> [--fix]`      — verify each section is
+        `header -> separator -> data`; reports (or with --fix repairs) a
+        missing or displaced separator row that would hide rows in renderers
   * `html-template-version`           — print the bundled template version
   * `regenerate-html-if-stale <html-path>`
         — write the bundled HTML template to the path if the file is missing
@@ -138,6 +141,75 @@ def regenerate_html_if_stale(html_path: Path) -> str:
     return "unchanged"
 
 
+SECTION_RE = re.compile(r"^##\s+(In-Progress|Pending|Shipped)\s*$", re.IGNORECASE)
+HEADER_RE = re.compile(r"^\|\s*ID\s*\|")
+SEP_CELL_RE = re.compile(r"^:?-+:?$")
+SEPARATOR = "|---|---|---|---|---|---|---|"
+
+
+def _is_separator_row(line: str) -> bool:
+    s = line.strip()
+    if not s.startswith("|"):
+        return False
+    cells = [c.strip() for c in s.strip("|").split("|")]
+    cells = [c for c in cells if c != ""]
+    return bool(cells) and all(SEP_CELL_RE.fullmatch(c) for c in cells)
+
+
+def validate(path: Path, fix: bool = False) -> tuple[list[str], bool]:
+    """Check that every section is `header -> separator -> data`.
+
+    A GFM table needs a separator row directly under its column header; if it
+    drifts (inserted rows displace it) or goes missing, downstream markdown
+    renderers silently drop every data row above it. Returns (problems, fixed).
+    When `fix` is True, rewrites the file so each section has exactly one
+    separator immediately after its header and none elsewhere.
+    """
+    lines = path.read_text(encoding="utf-8").split("\n")
+    problems: list[str] = []
+    out: list[str] = []
+    in_section = False
+    section_name = ""
+    expect_sep_after_header = False
+
+    for i, line in enumerate(lines, start=1):
+        m = SECTION_RE.match(line)
+        if m:
+            in_section = True
+            section_name = m.group(1)
+            expect_sep_after_header = False
+            out.append(line)
+            continue
+        if in_section and _is_separator_row(line):
+            if not expect_sep_after_header:
+                problems.append(
+                    f"line {i}: stray separator row inside '{section_name}' "
+                    f"(not directly under the header)"
+                )
+                # drop it when fixing
+                continue
+            expect_sep_after_header = False
+            out.append(line)
+            continue
+        out.append(line)
+        if in_section and HEADER_RE.match(line):
+            expect_sep_after_header = True
+        elif expect_sep_after_header and line.strip():
+            # First non-blank line after the header was NOT a separator.
+            problems.append(
+                f"line {i}: missing separator row under '{section_name}' header"
+            )
+            if fix:
+                out.insert(len(out) - 1, SEPARATOR)
+            expect_sep_after_header = False
+
+    fixed = False
+    if fix and problems:
+        path.write_text("\n".join(out), encoding="utf-8")
+        fixed = True
+    return problems, fixed
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print(__doc__, file=sys.stderr)
@@ -187,6 +259,30 @@ def main(argv: list[str]) -> int:
         result = regenerate_html_if_stale(Path(argv[2]))
         print(f"{result}: {argv[2]}")
         return 0
+
+    if cmd == "validate":
+        fix = "--fix" in argv[2:]
+        rest = [a for a in argv[2:] if a != "--fix"]
+        if len(rest) != 1:
+            print(
+                "usage: backlog_helper.py validate <md-path> [--fix]",
+                file=sys.stderr,
+            )
+            return 2
+        problems, fixed = validate(Path(rest[0]), fix=fix)
+        if not problems:
+            print(f"ok: {rest[0]} (sections well-formed)")
+            return 0
+        for p in problems:
+            print(p, file=sys.stderr)
+        if fixed:
+            print(f"fixed {len(problems)} issue(s): {rest[0]}")
+            return 0
+        print(
+            f"{len(problems)} structural issue(s); re-run with --fix",
+            file=sys.stderr,
+        )
+        return 1
 
     print(f"unknown subcommand: {cmd}", file=sys.stderr)
     print(__doc__, file=sys.stderr)

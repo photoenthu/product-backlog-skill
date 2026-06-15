@@ -198,9 +198,29 @@ Use the Edit tool to make targeted changes — never overwrite the whole file. F
 - **In-place update** (same section, new artifacts/notes/timestamp): edit only the affected line.
 - **New row**: insert at top of its target section.
 
-After all edits, re-read the file once and visually verify:
+> **"Top of section" means directly below the separator row, never above it.**
+> A GFM table is `column-header → separator (`|---|…|`) → data`. Inserting a
+> new row between the header and the separator pushes the separator down into
+> the data; over many inserts it drifts out of place or (when a section
+> empties and refills) goes missing entirely. A misplaced or missing separator
+> makes markdown renderers — including the bundled HTML dashboard — silently
+> drop every data row above it. So the newest row goes on the line *after* the
+> separator, and the separator must always remain the first line under the
+> column header.
+
+After all edits, **run the structural validator** — it is the authoritative
+check for the separator-drift bug above and must pass before you report
+success:
+
+```bash
+python3 "$SKILL_DIR/scripts/backlog_helper.py" validate "$BACKLOG"
+# if it reports problems, repair in place and re-run:
+python3 "$SKILL_DIR/scripts/backlog_helper.py" validate "$BACKLOG" --fix
+```
+
+Then re-read the file once and visually verify:
 - Three section headers are present and in the right order.
-- Each section's table header is intact.
+- Each section's table header is intact, with its separator row directly under it.
 - No row appears in two sections.
 - Every row has 7 cells (count the pipes).
 - IDs are unique.
