@@ -122,5 +122,42 @@ class ValidateShapeTest(unittest.TestCase):
         self.assertTrue(any("artifact" in p.lower() for p in problems))
 
 
+class IntegrityTest(unittest.TestCase):
+    def _data(self, *items):
+        return {"schemaVersion": 1, "items": list(items)}
+
+    def _with(self, item_id, deps):
+        item = _valid_item(item_id)
+        item["dependencies"] = deps
+        return item
+
+    def test_duplicate_ids(self):
+        problems = core.validate(self._data(_valid_item("BL-001"), _valid_item("BL-001")))
+        self.assertTrue(any("duplicate" in p.lower() for p in problems))
+
+    def test_dependency_must_exist(self):
+        problems = core.validate(self._data(self._with("BL-001", ["BL-099"])))
+        self.assertTrue(any("BL-099" in p for p in problems))
+
+    def test_no_self_dependency(self):
+        problems = core.validate(self._data(self._with("BL-001", ["BL-001"])))
+        self.assertTrue(any("itself" in p.lower() for p in problems))
+
+    def test_cycle_detected(self):
+        problems = core.validate(self._data(
+            self._with("BL-001", ["BL-002"]),
+            self._with("BL-002", ["BL-001"]),
+        ))
+        self.assertTrue(any("cycle" in p.lower() for p in problems))
+
+    def test_valid_dag_ok(self):
+        problems = core.validate(self._data(
+            self._with("BL-001", []),
+            self._with("BL-002", ["BL-001"]),
+            self._with("BL-003", ["BL-001", "BL-002"]),
+        ))
+        self.assertEqual(problems, [])
+
+
 if __name__ == "__main__":
     unittest.main()

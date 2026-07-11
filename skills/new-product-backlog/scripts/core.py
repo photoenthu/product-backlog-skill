@@ -172,5 +172,59 @@ def validate(data: object) -> list[str]:
 
 
 def _validate_integrity(items: list) -> list[str]:
-    """Placeholder — implemented in Task 4."""
-    return []
+    problems: list[str] = []
+    ids = [it.get("id") for it in items if isinstance(it, dict)]
+    valid_ids = [i for i in ids if isinstance(i, str) and ID_RE.match(i)]
+
+    seen: set[str] = set()
+    for i in valid_ids:
+        if i in seen:
+            problems.append(f"duplicate id: {i}")
+        seen.add(i)
+
+    id_set = set(valid_ids)
+    graph: dict[str, list[str]] = {}
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        iid = it.get("id")
+        deps = it.get("dependencies")
+        if not (isinstance(iid, str) and ID_RE.match(iid)) or not isinstance(deps, list):
+            continue
+        clean: list[str] = []
+        for d in deps:
+            if not (isinstance(d, str) and ID_RE.match(d)):
+                continue  # shape error already reported by _validate_item
+            if d == iid:
+                problems.append(f"{iid} cannot depend on itself")
+            elif d not in id_set:
+                problems.append(f"{iid} depends on {d}, which does not exist")
+            else:
+                clean.append(d)
+        graph[iid] = clean
+
+    # Cycle detection via DFS coloring.
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color = {n: WHITE for n in graph}
+    cyclic: set[str] = set()
+
+    def visit(node: str, stack: list[str]) -> None:
+        color[node] = GRAY
+        stack.append(node)
+        for nxt in graph.get(node, []):
+            if color.get(nxt) == GRAY:
+                # Found a back-edge; mark the members of the cycle.
+                if nxt in stack:
+                    cyclic.update(stack[stack.index(nxt):])
+            elif color.get(nxt) == WHITE:
+                visit(nxt, stack)
+        stack.pop()
+        color[node] = BLACK
+
+    for n in graph:
+        if color[n] == WHITE:
+            visit(n, [])
+    if cyclic:
+        problems.append(f"dependency cycle involving: {', '.join(sorted(cyclic))}")
+
+    return problems
