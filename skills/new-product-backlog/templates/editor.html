@@ -1,1 +1,51 @@
-<!DOCTYPE html><html><head><title>stub</title></head><body>stub</body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Product Backlog Editor</title>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// <applyFilters>
+function applyFilters(items, opts) {
+  const search = (opts.search || "").trim().toLowerCase();
+  const statuses = opts.statuses || [];
+  const priorities = opts.priorities || [];
+  const sortKey = opts.sortKey || "id";
+  const sortDir = opts.sortDir === "desc" ? "desc" : "asc";
+  const PRIORITY_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
+
+  let out = items.filter(function (it) {
+    if (statuses.length && statuses.indexOf(it.status) === -1) return false;
+    if (priorities.length && priorities.indexOf(it.priority) === -1) return false;
+    if (search) {
+      const hay = [it.id, it.name, it.description, it.notes]
+        .map(function (x) { return (x || "").toLowerCase(); })
+        .join(" ");
+      if (hay.indexOf(search) === -1) return false;
+    }
+    return true;
+  });
+
+  out.sort(function (a, b) {
+    let av, bv;
+    if (sortKey === "priority") {
+      av = PRIORITY_RANK[a.priority]; bv = PRIORITY_RANK[b.priority];
+    } else {
+      av = (a[sortKey] == null ? "" : a[sortKey]);
+      bv = (b[sortKey] == null ? "" : b[sortKey]);
+      av = typeof av === "string" ? av.toLowerCase() : av;
+      bv = typeof bv === "string" ? bv.toLowerCase() : bv;
+    }
+    if (av < bv) return sortDir === "asc" ? -1 : 1;
+    if (av > bv) return sortDir === "asc" ? 1 : -1;
+    return 0;
+  });
+  return out;
+}
+// </applyFilters>
+</script>
+</body>
+</html>
