@@ -1,6 +1,7 @@
 # tests/new_product_backlog_core_test.py
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -10,6 +11,15 @@ SCRIPTS = Path(__file__).resolve().parent.parent / "skills" / "new-product-backl
 sys.path.insert(0, str(SCRIPTS))
 
 import core  # noqa: E402
+
+CLI = SCRIPTS / "backlog.py"
+
+
+def _run(*args):
+    return subprocess.run(
+        [sys.executable, str(CLI), *args],
+        capture_output=True, text=True,
+    )
 
 
 class TempBacklog:
@@ -260,6 +270,56 @@ class MutationTest(unittest.TestCase):
         self.assertEqual([i["id"] for i in pend], ["BL-001"])
         high = core.list_items(data, priority="high")
         self.assertEqual([i["id"] for i in high], ["BL-001"])
+
+
+class CliTest(unittest.TestCase):
+    def test_init_add_list_edit_discard_roundtrip(self):
+        with TempBacklog() as t:
+            p = str(t.path)
+            self.assertEqual(_run("init", p).returncode, 0)
+
+            r = _run("add", p, "--name", "First", "--priority", "high")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("BL-001", r.stdout)
+
+            r = _run("list", p)
+            self.assertIn("First", r.stdout)
+
+            r = _run("edit", p, "BL-001", "--status", "shipped")
+            self.assertEqual(r.returncode, 0, r.stderr)
+
+            r = _run("get", p, "BL-001")
+            self.assertIn("shipped", r.stdout)
+
+            r = _run("validate", p)
+            self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_add_with_deps_and_artifact(self):
+        with TempBacklog() as t:
+            p = str(t.path)
+            _run("init", p)
+            _run("add", p, "--name", "Base")
+            r = _run("add", p, "--name", "Dep", "--depends", "BL-001",
+                     "--artifact", "plan=docs/p.md", "--dnbb", "2026-09-01")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            data = json.loads(t.path.read_text())
+            self.assertEqual(data["items"][1]["dependencies"], ["BL-001"])
+            self.assertEqual(data["items"][1]["doNotBuildBefore"], "2026-09-01")
+
+    def test_bad_dep_exits_nonzero_and_no_write(self):
+        with TempBacklog() as t:
+            p = str(t.path)
+            _run("init", p)
+            r = _run("add", p, "--name", "X", "--depends", "BL-777")
+            self.assertNotEqual(r.returncode, 0)
+            self.assertEqual(json.loads(t.path.read_text())["items"], [])
+
+    def test_next_id_and_now(self):
+        with TempBacklog() as t:
+            p = str(t.path)
+            _run("init", p)
+            self.assertIn("BL-001", _run("next-id", p).stdout)
+        self.assertRegex(_run("now").stdout.strip(), r"^\d{4}-\d{2}-\d{2}T")
 
 
 if __name__ == "__main__":
