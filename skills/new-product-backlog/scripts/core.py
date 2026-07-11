@@ -86,6 +86,91 @@ def next_id(data: dict) -> str:
     return f"BL-{highest + 1:03d}"
 
 
-def validate(data: dict) -> list[str]:
-    """Placeholder — full implementation lands in Task 3 and Task 4."""
+def _is_valid_date(value: str) -> bool:
+    if not DATE_RE.match(value):
+        return False
+    try:
+        date.fromisoformat(value)
+        return True
+    except ValueError:
+        return False
+
+
+def _validate_item(item: object, index: int) -> list[str]:
+    prefix = f"item[{index}]"
+    if not isinstance(item, dict):
+        return [f"{prefix}: must be an object"]
+    problems: list[str] = []
+
+    missing = [k for k in ITEM_KEYS if k not in item]
+    if missing:
+        problems.append(f"{prefix}: missing required field(s): {', '.join(missing)}")
+    extra = [k for k in item if k not in ITEM_KEYS]
+    if extra:
+        problems.append(f"{prefix}: unknown field(s): {', '.join(extra)}")
+
+    def is_str(k):
+        return isinstance(item.get(k), str)
+
+    if "id" in item and not (is_str("id") and ID_RE.match(item["id"])):
+        problems.append(f"{prefix}.id: must match BL-NNN (>=3 digits)")
+    if "name" in item and not (is_str("name") and item["name"].strip() != ""):
+        problems.append(f"{prefix}.name: must be a non-empty string")
+    for k in ("description", "notes", "createdAt", "updatedAt"):
+        if k in item and not is_str(k):
+            problems.append(f"{prefix}.{k}: must be a string")
+    if "status" in item and item.get("status") not in STATUSES:
+        problems.append(f"{prefix}.status: must be one of {', '.join(STATUSES)}")
+    if "priority" in item and item.get("priority") not in PRIORITIES:
+        problems.append(f"{prefix}.priority: must be one of {', '.join(PRIORITIES)}")
+
+    if "dependencies" in item:
+        deps = item["dependencies"]
+        if not isinstance(deps, list) or not all(
+            isinstance(d, str) and ID_RE.match(d) for d in deps
+        ):
+            problems.append(f"{prefix}.dependencies: must be a list of BL-NNN ids")
+
+    if "doNotBuildBefore" in item:
+        dnbb = item["doNotBuildBefore"]
+        if dnbb is not None and not (isinstance(dnbb, str) and _is_valid_date(dnbb)):
+            problems.append(f"{prefix}.doNotBuildBefore: must be null or a YYYY-MM-DD date")
+
+    if "artifacts" in item:
+        arts = item["artifacts"]
+        ok = isinstance(arts, list) and all(
+            isinstance(a, dict)
+            and set(a.keys()) == {"label", "url"}
+            and isinstance(a.get("label"), str) and a["label"] != ""
+            and isinstance(a.get("url"), str) and a["url"] != ""
+            for a in arts
+        )
+        if not ok:
+            problems.append(f"{prefix}.artifacts: must be a list of {{label, url}} non-empty strings")
+
+    return problems
+
+
+def validate(data: object) -> list[str]:
+    """Return a list of human-readable problems. Empty list == valid.
+
+    Covers structural shape, enums, id/date patterns, AND referential
+    integrity (unique ids, deps exist, no self-deps, no cycles — added in
+    Task 4)."""
+    problems: list[str] = []
+    if not isinstance(data, dict):
+        return ["top level: must be an object"]
+    if data.get("schemaVersion") != SCHEMA_VERSION:
+        problems.append(f"schemaVersion: must equal {SCHEMA_VERSION}")
+    items = data.get("items")
+    if not isinstance(items, list):
+        return problems + ["items: must be an array"]
+    for i, item in enumerate(items):
+        problems.extend(_validate_item(item, i))
+    problems.extend(_validate_integrity(items))
+    return problems
+
+
+def _validate_integrity(items: list) -> list[str]:
+    """Placeholder — implemented in Task 4."""
     return []

@@ -64,5 +64,63 @@ def _valid_item(item_id):
     }
 
 
+class ValidateShapeTest(unittest.TestCase):
+    def _data(self, *items):
+        return {"schemaVersion": 1, "items": list(items)}
+
+    def test_valid_item_has_no_problems(self):
+        self.assertEqual(core.validate(self._data(_valid_item("BL-001"))), [])
+
+    def test_bad_schema_version(self):
+        problems = core.validate({"schemaVersion": 2, "items": []})
+        self.assertTrue(any("schemaVersion" in p for p in problems))
+
+    def test_missing_required_field(self):
+        item = _valid_item("BL-001")
+        del item["priority"]
+        problems = core.validate(self._data(item))
+        self.assertTrue(any("priority" in p for p in problems))
+
+    def test_bad_status_enum(self):
+        item = _valid_item("BL-001")
+        item["status"] = "done"
+        problems = core.validate(self._data(item))
+        self.assertTrue(any("status" in p for p in problems))
+
+    def test_bad_priority_enum(self):
+        item = _valid_item("BL-001")
+        item["priority"] = "urgent"
+        problems = core.validate(self._data(item))
+        self.assertTrue(any("priority" in p for p in problems))
+
+    def test_bad_id_pattern(self):
+        item = _valid_item("XX-1")
+        problems = core.validate(self._data(item))
+        self.assertTrue(any("id" in p for p in problems))
+
+    def test_empty_name(self):
+        item = _valid_item("BL-001")
+        item["name"] = ""
+        problems = core.validate(self._data(item))
+        self.assertTrue(any("name" in p for p in problems))
+
+    def test_bad_dnbb_not_a_date(self):
+        item = _valid_item("BL-001")
+        item["doNotBuildBefore"] = "2026-13-40"
+        problems = core.validate(self._data(item))
+        self.assertTrue(any("doNotBuildBefore" in p for p in problems))
+
+    def test_valid_dnbb_and_null_ok(self):
+        good = _valid_item("BL-001")
+        good["doNotBuildBefore"] = "2026-07-01"
+        self.assertEqual(core.validate(self._data(good)), [])
+
+    def test_bad_artifact_shape(self):
+        item = _valid_item("BL-001")
+        item["artifacts"] = [{"label": "x"}]  # missing url
+        problems = core.validate(self._data(item))
+        self.assertTrue(any("artifact" in p.lower() for p in problems))
+
+
 if __name__ == "__main__":
     unittest.main()
