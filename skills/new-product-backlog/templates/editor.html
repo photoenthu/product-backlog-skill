@@ -3,10 +3,516 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Product Backlog Editor</title>
+<title>Product Backlog Console</title>
+<style>
+/* ============================================================= *
+ *  Backlog Console — a local build-readiness board.
+ *  Design: blue-ink engineering console. Semantic state shown as
+ *  lamps (dots) + a priority rail, not saturated-text pills.
+ *  Monospace for all codes (ids, dates, timestamps); grotesk chrome.
+ * ============================================================= */
+
+/* --- Light is the default; dark via media query; both overridable
+       through :root[data-theme="..."] (the theme toggle stamps it). --- */
+:root {
+  --bg:        #eef1f8;
+  --surface:   #ffffff;
+  --surface-2: #f4f6fb;
+  --surface-3: #e9edf6;
+  --border:    #d3dae8;
+  --border-2:  #c2cbdd;
+  --text:      #182338;
+  --muted:     #5c6b85;
+  --faint:     #8794ac;
+
+  --accent:    #5646f0;
+  --accent-2:  #7c74ff;
+  --accent-ink:#ffffff;
+  --focus:     #5646f0;
+
+  --chip-bg:   #f4f6fb;
+
+  --st-new:       #2f6bff;
+  --st-pending:   #c98400;
+  --st-shipped:   #12a45f;
+  --st-discarded: #8794ac;
+
+  --pr-critical: #e23c54;
+  --pr-high:     #d97316;
+  --pr-medium:   #0f9aa0;
+  --pr-low:      #7a869b;
+
+  --warn:      #d97316;
+  --block:     #e23c54;
+
+  --shadow: 0 1px 2px rgba(20,30,55,.06), 0 12px 32px rgba(20,30,55,.10);
+  --rail-w: 3px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:        #0a0e17;
+    --surface:   #131a28;
+    --surface-2: #1a2333;
+    --surface-3: #202b3e;
+    --border:    #2a3547;
+    --border-2:  #384660;
+    --text:      #e6ecf6;
+    --muted:     #93a1bb;
+    --faint:     #63718c;
+
+    --accent:    #7c74ff;
+    --accent-2:  #9a93ff;
+    --accent-ink:#0a0e17;
+    --focus:     #9a93ff;
+
+    --chip-bg:   #1a2333;
+
+    --st-new:       #5b9dff;
+    --st-pending:   #f5b544;
+    --st-shipped:   #3fcf8e;
+    --st-discarded: #6b7688;
+
+    --pr-critical: #ff5c72;
+    --pr-high:     #ff9d4d;
+    --pr-medium:   #37c2c4;
+    --pr-low:      #8593ab;
+
+    --warn:      #f5b544;
+    --block:     #ff5c72;
+
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 18px 44px rgba(0,0,0,.5);
+  }
+}
+
+/* Explicit overrides win regardless of OS preference. */
+:root[data-theme="light"] {
+  --bg:#eef1f8; --surface:#ffffff; --surface-2:#f4f6fb; --surface-3:#e9edf6;
+  --border:#d3dae8; --border-2:#c2cbdd; --text:#182338; --muted:#5c6b85; --faint:#8794ac;
+  --accent:#5646f0; --accent-2:#7c74ff; --accent-ink:#ffffff; --focus:#5646f0; --chip-bg:#f4f6fb;
+  --st-new:#2f6bff; --st-pending:#c98400; --st-shipped:#12a45f; --st-discarded:#8794ac;
+  --pr-critical:#e23c54; --pr-high:#d97316; --pr-medium:#0f9aa0; --pr-low:#7a869b;
+  --warn:#d97316; --block:#e23c54;
+  --shadow: 0 1px 2px rgba(20,30,55,.06), 0 12px 32px rgba(20,30,55,.10);
+}
+:root[data-theme="dark"] {
+  --bg:#0a0e17; --surface:#131a28; --surface-2:#1a2333; --surface-3:#202b3e;
+  --border:#2a3547; --border-2:#384660; --text:#e6ecf6; --muted:#93a1bb; --faint:#63718c;
+  --accent:#7c74ff; --accent-2:#9a93ff; --accent-ink:#0a0e17; --focus:#9a93ff; --chip-bg:#1a2333;
+  --st-new:#5b9dff; --st-pending:#f5b544; --st-shipped:#3fcf8e; --st-discarded:#6b7688;
+  --pr-critical:#ff5c72; --pr-high:#ff9d4d; --pr-medium:#37c2c4; --pr-low:#8593ab;
+  --warn:#f5b544; --block:#ff5c72;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 18px 44px rgba(0,0,0,.5);
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin:0; padding:0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+.mono {
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Menlo", "Consolas", monospace;
+  font-feature-settings: "ss01","cv01";
+}
+
+/* Faint blueprint grid behind the whole console. */
+body::before {
+  content: "";
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 44px 44px;
+  opacity: .16;
+  mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, #000 0%, transparent 75%);
+}
+
+.wrap {
+  position: relative; z-index: 1;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 28px 24px 64px;
+}
+
+/* ---------- Console header ---------- */
+.console {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 20px; flex-wrap: wrap;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 22px;
+}
+.brand .eyebrow {
+  font-size: 11px; letter-spacing: .22em; text-transform: uppercase;
+  color: var(--faint); font-weight: 700;
+  display: flex; align-items: center; gap: 9px;
+}
+.brand .eyebrow::before {
+  content: ""; width: 20px; height: 2px; background: var(--accent); display: inline-block;
+}
+.brand h1 {
+  margin: 8px 0 0; font-size: 30px; font-weight: 800; letter-spacing: -.02em;
+  line-height: 1;
+}
+.readout {
+  margin-top: 12px; display: flex; align-items: center; gap: 14px;
+  font-size: 13px; color: var(--muted);
+}
+.readout b { color: var(--text); font-weight: 700; }
+.readout .sep { width: 4px; height: 4px; border-radius: 50%; background: var(--border-2); }
+.readout .hold-count { color: var(--warn); }
+.readout .hold-count.zero { color: var(--muted); }
+.readout .hold-count b { color: inherit; }
+
+.header-actions { display: flex; gap: 10px; align-items: center; }
+
+/* ---------- Buttons ---------- */
+.btn {
+  font: inherit; font-size: 14px; font-weight: 600;
+  border: 1px solid var(--border-2); background: var(--surface); color: var(--text);
+  border-radius: 9px; padding: 9px 14px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 7px;
+  transition: background .12s ease, border-color .12s ease, transform .06s ease;
+}
+.btn:hover { background: var(--surface-2); border-color: var(--faint); }
+.btn:active { transform: translateY(1px); }
+.btn.primary {
+  background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+}
+.btn.primary:hover { background: var(--accent-2); border-color: var(--accent-2); }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+.btn.ghost:hover { background: var(--surface-2); color: var(--text); }
+.btn.danger { color: var(--block); }
+.btn.danger:hover { background: color-mix(in srgb, var(--block) 12%, transparent); }
+.btn.icon { padding: 8px 10px; }
+
+.btn:focus-visible, .chip:focus-visible, input:focus-visible,
+textarea:focus-visible, select:focus-visible, .th-sort:focus-visible {
+  outline: 2px solid var(--focus); outline-offset: 2px;
+}
+
+/* ---------- Toolbar ---------- */
+.toolbar {
+  display: flex; align-items: center; gap: 16px 20px; flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.search {
+  position: relative; flex: 1 1 260px; min-width: 200px;
+}
+.search input {
+  width: 100%; font: inherit; font-size: 14px;
+  padding: 10px 12px 10px 36px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface); color: var(--text);
+}
+.search input::placeholder { color: var(--faint); }
+.search .glass {
+  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  color: var(--faint); pointer-events: none; font-size: 15px;
+}
+.filter-group { display: flex; align-items: center; gap: 8px; }
+.filter-group > .label {
+  font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--faint); font-weight: 700; margin-right: 2px;
+}
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip {
+  font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--border); background: var(--chip-bg); color: var(--muted);
+  border-radius: 999px; padding: 5px 11px 5px 9px;
+  display: inline-flex; align-items: center; gap: 7px;
+  transition: border-color .12s, color .12s, background .12s;
+}
+.chip .dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--c, var(--faint));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--c, var(--faint)) 22%, transparent);
+  flex: none;
+}
+.chip:hover { color: var(--text); border-color: var(--border-2); }
+.chip.on {
+  color: var(--text); border-color: color-mix(in srgb, var(--c) 60%, var(--border-2));
+  background: color-mix(in srgb, var(--c) 12%, var(--surface));
+}
+.chip.on .dot { box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 34%, transparent); }
+
+/* ---------- Table ---------- */
+.table-wrap {
+  border: 1px solid var(--border); border-radius: 14px;
+  background: var(--surface); overflow-x: auto; box-shadow: var(--shadow);
+}
+table { width: 100%; border-collapse: collapse; min-width: 900px; }
+thead th {
+  text-align: left; font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--faint); font-weight: 700;
+  padding: 12px 14px; border-bottom: 1px solid var(--border);
+  background: var(--surface-2); white-space: nowrap; position: sticky; top: 0; z-index: 2;
+}
+thead th.rail-col { padding: 0; width: var(--rail-w); }
+.th-sort {
+  all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+  font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit;
+}
+.th-sort:hover { color: var(--text); }
+.th-sort .arrow { color: var(--accent); font-size: 10px; }
+th.sorted { color: var(--text); }
+
+tbody tr { border-bottom: 1px solid var(--border); }
+tbody tr:last-child { border-bottom: none; }
+tbody tr:hover { background: var(--surface-2); }
+tbody td { padding: 11px 14px; vertical-align: middle; }
+td.rail-col {
+  padding: 0; width: var(--rail-w);
+  background: var(--c, var(--border));
+}
+td.id-cell { white-space: nowrap; }
+.id-cell .idtxt { font-size: 13px; font-weight: 600; letter-spacing: .01em; }
+.name-cell { min-width: 220px; }
+.name-cell .nm { font-weight: 600; }
+.name-cell .desc {
+  color: var(--muted); font-size: 12.5px; margin-top: 2px;
+  display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden;
+}
+.badges { display: inline-flex; gap: 6px; margin-left: 8px; vertical-align: middle; }
+.badge {
+  font-family: ui-monospace, monospace; font-size: 9.5px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase;
+  padding: 2px 6px; border-radius: 5px; white-space: nowrap; cursor: help;
+  border: 1px solid var(--c); color: var(--c);
+  background: color-mix(in srgb, var(--c) 12%, transparent);
+}
+.badge.embargo { --c: var(--warn); }
+.badge.blocked { --c: var(--block); }
+
+/* Status lamp pill */
+.pill {
+  display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
+  background: var(--chip-bg); border: 1px solid var(--border);
+  border-radius: 999px; padding: 3px 11px 3px 9px;
+  font-size: 12.5px; font-weight: 600; text-transform: capitalize;
+}
+.pill .dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--c); flex: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 22%, transparent);
+}
+.pill.status-new { --c: var(--st-new); }
+.pill.status-pending { --c: var(--st-pending); }
+.pill.status-shipped { --c: var(--st-shipped); }
+.pill.status-discarded { --c: var(--st-discarded); }
+tr.is-discarded { opacity: .62; }
+
+/* Priority tag — squared, colored left bar (matches the row rail) */
+.tag {
+  display: inline-flex; align-items: center; white-space: nowrap;
+  font-size: 12.5px; font-weight: 600; text-transform: capitalize;
+  padding: 3px 10px 3px 9px; border-radius: 6px;
+  background: var(--chip-bg); border: 1px solid var(--border);
+  border-left: 3px solid var(--c);
+}
+.tag.priority-critical { --c: var(--pr-critical); }
+.tag.priority-high { --c: var(--pr-high); }
+.tag.priority-medium { --c: var(--pr-medium); }
+.tag.priority-low { --c: var(--pr-low); }
+
+.date-cell { white-space: nowrap; font-size: 13px; }
+.date-cell.none { color: var(--faint); }
+.updated-cell { white-space: nowrap; font-size: 12.5px; color: var(--muted); }
+
+.deps { display: flex; gap: 5px; flex-wrap: wrap; }
+.dep {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; font-weight: 600; padding: 2px 7px 2px 6px;
+  border-radius: 6px; background: var(--chip-bg); border: 1px solid var(--border);
+}
+.dep .dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--c); flex: none;
+}
+.dep.ready { --c: var(--st-shipped); }
+.dep.wait  { --c: var(--warn); }
+.deps.none { color: var(--faint); }
+
+.actions-cell { text-align: right; white-space: nowrap; width: 44px; }
+.kebab {
+  all: unset; cursor: pointer; color: var(--muted);
+  padding: 4px 8px; border-radius: 7px; line-height: 1; font-size: 18px;
+}
+.kebab:hover { background: var(--surface-3); color: var(--text); }
+.kebab:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* ---------- Floating action menu (portal in body, never clipped) ---------- */
+.action-menu {
+  position: fixed; z-index: 60; min-width: 160px;
+  background: var(--surface); border: 1px solid var(--border-2);
+  border-radius: 11px; box-shadow: var(--shadow); padding: 5px;
+  display: none;
+}
+.action-menu.open { display: block; }
+.action-menu button {
+  all: unset; box-sizing: border-box; width: 100%; cursor: pointer;
+  font: inherit; font-size: 13.5px; padding: 8px 11px; border-radius: 7px;
+  display: flex; align-items: center; gap: 9px; color: var(--text);
+}
+.action-menu button:hover { background: var(--surface-2); }
+.action-menu button.danger { color: var(--block); }
+.action-menu button.danger:hover { background: color-mix(in srgb, var(--block) 12%, transparent); }
+.action-menu .sep { height: 1px; background: var(--border); margin: 4px 2px; }
+
+/* ---------- Empty state ---------- */
+.empty {
+  padding: 56px 24px; text-align: center; color: var(--muted);
+}
+.empty .big { font-size: 17px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+.empty .sub { font-size: 14px; max-width: 400px; margin: 0 auto 18px; }
+
+/* ---------- Modal ---------- */
+.scrim {
+  position: fixed; inset: 0; z-index: 50;
+  background: color-mix(in srgb, #05070d 55%, transparent);
+  backdrop-filter: blur(3px);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 40px 16px; overflow-y: auto;
+  animation: fade .14s ease;
+}
+.modal {
+  width: 100%; max-width: 620px; background: var(--surface);
+  border: 1px solid var(--border-2); border-radius: 16px; box-shadow: var(--shadow);
+  animation: pop .16s ease;
+}
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 22px; border-bottom: 1px solid var(--border);
+}
+.modal-head .eyebrow {
+  font-size: 10.5px; letter-spacing: .18em; text-transform: uppercase;
+  color: var(--faint); font-weight: 700;
+}
+.modal-head h2 { margin: 3px 0 0; font-size: 20px; font-weight: 800; letter-spacing: -.01em; }
+.modal-head .x {
+  all: unset; cursor: pointer; color: var(--muted); font-size: 22px; line-height: 1;
+  padding: 4px 8px; border-radius: 7px;
+}
+.modal-head .x:hover { background: var(--surface-2); color: var(--text); }
+.modal-body { padding: 20px 22px; }
+.modal-foot {
+  display: flex; align-items: center; justify-content: flex-end; gap: 10px;
+  padding: 16px 22px; border-top: 1px solid var(--border);
+}
+
+.modal-error {
+  display: none; margin-bottom: 16px; padding: 11px 13px;
+  border-radius: 10px; font-size: 13px;
+  border: 1px solid color-mix(in srgb, var(--block) 45%, transparent);
+  background: color-mix(in srgb, var(--block) 12%, transparent);
+  color: var(--text); white-space: pre-wrap;
+}
+.modal-error.show { display: block; }
+.modal-error .etitle { font-weight: 700; color: var(--block); }
+
+.field { margin-bottom: 16px; }
+.field > label {
+  display: block; font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+  font-weight: 700; color: var(--muted); margin-bottom: 6px;
+}
+.field > label .req { color: var(--block); margin-left: 3px; }
+.field input[type="text"], .field textarea, .field select, .field input[type="date"] {
+  width: 100%; font: inherit; font-size: 14px;
+  padding: 9px 11px; border: 1px solid var(--border); border-radius: 9px;
+  background: var(--surface-2); color: var(--text);
+}
+.field textarea { resize: vertical; min-height: 62px; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.date-row { display: flex; gap: 8px; align-items: center; }
+.date-row input { flex: 1; }
+
+.dep-picker {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  max-height: 132px; overflow-y: auto;
+  padding: 10px; border: 1px solid var(--border); border-radius: 9px;
+  background: var(--surface-2);
+}
+.dep-picker .empty-note { color: var(--faint); font-size: 13px; }
+.dep-toggle {
+  all: unset; cursor: pointer; font-size: 12.5px; font-weight: 600;
+  padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--muted);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.dep-toggle .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+.dep-toggle.ready { --c: var(--st-shipped); }
+.dep-toggle.wait  { --c: var(--warn); }
+.dep-toggle.on { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+.dep-toggle.on .dot { background: var(--accent-ink); }
+
+.artifacts .art-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+.artifacts .art-row input { flex: 1; }
+.artifacts .art-row input.label-in { flex: 0 0 34%; }
+.art-remove {
+  all: unset; cursor: pointer; color: var(--muted); font-size: 17px; line-height: 1;
+  padding: 6px 8px; border-radius: 7px;
+}
+.art-remove:hover { background: color-mix(in srgb, var(--block) 12%, transparent); color: var(--block); }
+.art-add { margin-top: 2px; }
+.hint { font-size: 12px; color: var(--faint); margin-top: 6px; }
+
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+
+@media (max-width: 560px) {
+  .grid-2 { grid-template-columns: 1fr; }
+  .brand h1 { font-size: 24px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
 </head>
 <body>
-<div id="app"></div>
+<div class="wrap">
+  <header class="console">
+    <div class="brand">
+      <div class="eyebrow">Local build backlog</div>
+      <h1>Backlog Console</h1>
+      <div class="readout" id="readout"></div>
+    </div>
+    <div class="header-actions">
+      <button class="btn icon" id="theme-toggle" title="Toggle theme" aria-label="Toggle color theme">◑</button>
+      <button class="btn primary" id="new-btn">+ New item</button>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <div class="search">
+      <span class="glass" aria-hidden="true">⌕</span>
+      <input type="text" id="search" placeholder="Search id, name, description, notes…" aria-label="Search backlog">
+    </div>
+    <div class="filter-group">
+      <span class="label">Status</span>
+      <div class="chips" id="status-chips"></div>
+    </div>
+    <div class="filter-group">
+      <span class="label">Priority</span>
+      <div class="chips" id="priority-chips"></div>
+    </div>
+  </div>
+
+  <div class="table-wrap" id="table-wrap">
+    <table>
+      <thead><tr id="head-row"></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <div class="empty" id="empty" style="display:none"></div>
+  </div>
+</div>
+
+<div id="modal-root"></div>
+
 <script>
 // <applyFilters>
 function applyFilters(items, opts) {
@@ -46,6 +552,621 @@ function applyFilters(items, opts) {
   return out;
 }
 // </applyFilters>
+
+/* ============================================================= *
+ *  Editor application. All DOM is built with createElement /
+ *  textContent (never innerHTML with item text) so any string in
+ *  the backlog is inert. Mutations go through api() and re-render
+ *  from the authoritative backlog the server returns.
+ * ============================================================= */
+
+/* --- tiny hyperscript helper (text nodes => auto-escaped) --- */
+function h(tag, attrs) {
+  const el = document.createElement(tag);
+  if (attrs) {
+    for (const k in attrs) {
+      const v = attrs[k];
+      if (v == null || v === false) continue;
+      if (k === "class") el.className = v;
+      else if (k === "text") el.textContent = v;
+      else if (k === "html") { /* intentionally unsupported */ }
+      else if (k === "dataset") { for (const d in v) el.dataset[d] = v[d]; }
+      else if (k.slice(0, 2) === "on" && typeof v === "function") {
+        el.addEventListener(k.slice(2).toLowerCase(), v);
+      } else if (v === true) el.setAttribute(k, "");
+      else el.setAttribute(k, v);
+    }
+  }
+  for (let i = 2; i < arguments.length; i++) {
+    const kid = arguments[i];
+    append(el, kid);
+  }
+  return el;
+}
+function append(el, kid) {
+  if (kid == null || kid === false) return;
+  if (Array.isArray(kid)) { kid.forEach(function (k) { append(el, k); }); return; }
+  el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+}
+
+/* --- fetch helper (per contract) --- */
+async function api(method, url, body) {
+  const res = await fetch(url, {
+    method: method,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+  return data;
+}
+
+/* --- application state --- */
+const STATUS_FALLBACK = ["new", "pending", "shipped", "discarded"];
+const PRIORITY_FALLBACK = ["critical", "high", "medium", "low"];
+
+const state = {
+  schema: null,
+  items: [],
+  statusValues: STATUS_FALLBACK,
+  priorityValues: PRIORITY_FALLBACK,
+  search: "",
+  statuses: [],
+  priorities: [],
+  sortKey: "id",
+  sortDir: "asc",
+};
+
+const COLUMNS = [
+  { key: "id", label: "ID", sort: "id" },
+  { key: "name", label: "Name", sort: "name" },
+  { key: "status", label: "Status", sort: "status" },
+  { key: "priority", label: "Priority", sort: "priority" },
+  { key: "doNotBuildBefore", label: "Not before", sort: "doNotBuildBefore" },
+  { key: "dependencies", label: "Dependencies", sort: null },
+  { key: "updatedAt", label: "Updated", sort: "updatedAt" },
+  { key: "actions", label: "", sort: null },
+];
+
+/* --- utilities --- */
+function todayStr() {
+  const d = new Date();
+  const p = function (n) { return String(n).padStart(2, "0"); };
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+}
+function fmtTimestamp(v) {
+  if (!v) return "";
+  return String(v).slice(0, 16).replace("T", " ");
+}
+function itemsById() {
+  const map = {};
+  state.items.forEach(function (it) { map[it.id] = it; });
+  return map;
+}
+/* Readiness signals for a row, per the contract:
+   (a) doNotBuildBefore in the future, (b) any dependency not shipped. */
+function warningsFor(item, byId) {
+  const w = [];
+  if (item.doNotBuildBefore && item.doNotBuildBefore > todayStr()) {
+    w.push({ kind: "embargo", label: "Embargo",
+             title: "Do not build before " + item.doNotBuildBefore });
+  }
+  const blocking = (item.dependencies || []).filter(function (d) {
+    const dep = byId[d];
+    return !dep || dep.status !== "shipped";
+  });
+  if (blocking.length) {
+    w.push({ kind: "blocked", label: "Blocked",
+             title: "Waiting on: " + blocking.join(", ") });
+  }
+  return w;
+}
+function schemaEnum(prop, fallback) {
+  try {
+    const e = state.schema.$defs.item.properties[prop].enum;
+    if (Array.isArray(e) && e.length) return e.slice();
+  } catch (_) {}
+  return fallback.slice();
+}
+
+/* ---------- Toolbar (built once) ---------- */
+function buildChips() {
+  const sc = document.getElementById("status-chips");
+  const pc = document.getElementById("priority-chips");
+  sc.textContent = ""; pc.textContent = "";
+
+  state.statusValues.forEach(function (s) {
+    sc.append(makeChip(s, "status-" + s, function () {
+      toggleIn(state.statuses, s); refresh();
+    }, "status", s));
+  });
+  state.priorityValues.forEach(function (p) {
+    pc.append(makeChip(p, "priority-" + p, function () {
+      toggleIn(state.priorities, p); refresh();
+    }, "priority", p));
+  });
+}
+function makeChip(label, cvar, onClick, group, value) {
+  const chip = h("button", { class: "chip", type: "button", onClick: onClick,
+                             "aria-pressed": "false" },
+    h("span", { class: "dot" }), label);
+  chip.style.setProperty("--c", "var(--" + shortVar(group, value) + ")");
+  chip.dataset.group = group; chip.dataset.value = value;
+  return chip;
+}
+function shortVar(group, value) {
+  return (group === "status" ? "st-" : "pr-") + value;
+}
+function toggleIn(arr, v) {
+  const i = arr.indexOf(v);
+  if (i === -1) arr.push(v); else arr.splice(i, 1);
+}
+function syncChipStates() {
+  document.querySelectorAll(".chip").forEach(function (chip) {
+    const on = chip.dataset.group === "status"
+      ? state.statuses.indexOf(chip.dataset.value) !== -1
+      : state.priorities.indexOf(chip.dataset.value) !== -1;
+    chip.classList.toggle("on", on);
+    chip.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+
+/* ---------- Table head ---------- */
+function buildHead() {
+  const row = document.getElementById("head-row");
+  row.textContent = "";
+  row.append(h("th", { class: "rail-col", "aria-hidden": "true" }));
+  COLUMNS.forEach(function (col) {
+    if (col.key === "actions") {
+      row.append(h("th", { class: "actions-col", "aria-label": "Actions" }));
+      return;
+    }
+    const th = h("th");
+    if (col.sort) {
+      const active = state.sortKey === col.sort;
+      if (active) th.classList.add("sorted");
+      const btn = h("button", { class: "th-sort", type: "button",
+        onClick: function () { onSort(col.sort); },
+        "aria-label": "Sort by " + col.label },
+        col.label,
+        active ? h("span", { class: "arrow" }, state.sortDir === "asc" ? "▲" : "▼") : null);
+      th.append(btn);
+    } else {
+      th.append(col.label);
+    }
+    row.append(th);
+  });
+}
+function onSort(key) {
+  if (state.sortKey === key) {
+    state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
+  } else {
+    state.sortKey = key; state.sortDir = "asc";
+  }
+  buildHead();
+  refresh();
+}
+
+/* ---------- Table body ---------- */
+function refresh() {
+  syncChipStates();
+  renderReadout();
+  renderBody();
+}
+function renderReadout() {
+  const readout = document.getElementById("readout");
+  readout.textContent = "";
+  const byId = itemsById();
+  const total = state.items.length;
+  const onHold = state.items.filter(function (it) {
+    return warningsFor(it, byId).length > 0;
+  }).length;
+
+  readout.append(
+    h("span", null, h("b", null, String(total)), " " + (total === 1 ? "item" : "items")),
+    h("span", { class: "sep" }),
+    h("span", { class: "hold-count" + (onHold ? "" : " zero") },
+      h("b", null, String(onHold)), " on hold")
+  );
+}
+function renderBody() {
+  const tbody = document.getElementById("tbody");
+  const empty = document.getElementById("empty");
+  tbody.textContent = "";
+
+  const byId = itemsById();
+  const rows = applyFilters(state.items, {
+    search: state.search,
+    statuses: state.statuses,
+    priorities: state.priorities,
+    sortKey: state.sortKey,
+    sortDir: state.sortDir,
+  });
+
+  if (!rows.length) {
+    empty.style.display = "";
+    empty.textContent = "";
+    if (state.items.length === 0) {
+      empty.append(
+        h("div", { class: "big" }, "No items yet"),
+        h("div", { class: "sub" },
+          "Add your first shippable feature to start tracking build order and readiness."),
+        h("button", { class: "btn primary", type: "button", onClick: function () { openModal(null); } },
+          "+ New item")
+      );
+    } else {
+      empty.append(
+        h("div", { class: "big" }, "No matches"),
+        h("div", { class: "sub" }, "No items match the current search and filters."),
+        h("button", { class: "btn", type: "button", onClick: clearFilters }, "Clear filters")
+      );
+    }
+    return;
+  }
+  empty.style.display = "none";
+  rows.forEach(function (it) { tbody.append(renderRow(it, byId)); });
+}
+
+function renderRow(it, byId) {
+  const warns = warningsFor(it, byId);
+  const tr = h("tr", { class: it.status === "discarded" ? "is-discarded" : null });
+
+  // priority rail
+  const rail = h("td", { class: "rail-col" });
+  rail.style.setProperty("--c", "var(--pr-" + it.priority + ")");
+  tr.append(rail);
+
+  // id
+  tr.append(h("td", { class: "id-cell mono" }, h("span", { class: "idtxt" }, it.id)));
+
+  // name + description + readiness badges
+  const nameCell = h("td", { class: "name-cell" });
+  const nameLine = h("div", { class: "nm" }, it.name);
+  if (warns.length) {
+    const badges = h("span", { class: "badges" });
+    warns.forEach(function (w) {
+      badges.append(h("span", { class: "badge " + w.kind, title: w.title }, w.label));
+    });
+    nameLine.append(badges);
+  }
+  nameCell.append(nameLine);
+  if (it.description) nameCell.append(h("div", { class: "desc" }, it.description));
+  tr.append(nameCell);
+
+  // status pill
+  tr.append(h("td", null,
+    h("span", { class: "pill status-" + it.status }, h("span", { class: "dot" }), it.status)));
+
+  // priority tag
+  tr.append(h("td", null,
+    h("span", { class: "tag priority-" + it.priority }, it.priority)));
+
+  // not-before date
+  const d = it.doNotBuildBefore;
+  tr.append(h("td", { class: "date-cell mono" + (d ? "" : " none") }, d || "—"));
+
+  // dependencies
+  const depTd = h("td");
+  const deps = it.dependencies || [];
+  if (!deps.length) {
+    depTd.append(h("span", { class: "deps none mono" }, "—"));
+  } else {
+    const box = h("div", { class: "deps mono" });
+    deps.forEach(function (id) {
+      const dep = byId[id];
+      const ready = dep && dep.status === "shipped";
+      box.append(h("span", { class: "dep " + (ready ? "ready" : "wait"),
+        title: dep ? (dep.name + " — " + dep.status) : "missing" },
+        h("span", { class: "dot" }), id));
+    });
+    depTd.append(box);
+  }
+  tr.append(depTd);
+
+  // updated
+  tr.append(h("td", { class: "updated-cell mono" }, fmtTimestamp(it.updatedAt)));
+
+  // actions
+  const actTd = h("td", { class: "actions-cell" });
+  const kebab = h("button", { class: "kebab", type: "button", "aria-haspopup": "menu",
+    "aria-label": "Actions for " + it.id,
+    onClick: function (e) { e.stopPropagation(); openRowMenu(it, kebab); } }, "⋯");
+  actTd.append(kebab);
+  tr.append(actTd);
+
+  return tr;
+}
+
+function clearFilters() {
+  state.search = "";
+  state.statuses = [];
+  state.priorities = [];
+  document.getElementById("search").value = "";
+  refresh();
+}
+
+/* ---------- Floating row-action menu ---------- */
+const actionMenu = h("div", { class: "action-menu", role: "menu" });
+document.body.append(actionMenu);
+let menuOpen = false;
+
+function openRowMenu(item, anchor) {
+  actionMenu.textContent = "";
+  actionMenu.append(
+    h("button", { type: "button", role: "menuitem",
+      onClick: function () { closeRowMenu(); openModal(item.id); } }, "Edit"),
+    h("button", { type: "button", role: "menuitem",
+      onClick: function () { closeRowMenu(); doDiscard(item); } }, "Discard"),
+    h("div", { class: "sep" }),
+    h("button", { class: "danger", type: "button", role: "menuitem",
+      onClick: function () { closeRowMenu(); doDelete(item); } }, "Delete")
+  );
+  const r = anchor.getBoundingClientRect();
+  actionMenu.classList.add("open");
+  const width = actionMenu.offsetWidth || 160;
+  let left = r.right - width;
+  if (left < 8) left = 8;
+  actionMenu.style.left = left + "px";
+  actionMenu.style.top = (r.bottom + 4) + "px";
+  menuOpen = true;
+}
+function closeRowMenu() {
+  if (!menuOpen) return;
+  actionMenu.classList.remove("open");
+  menuOpen = false;
+}
+document.addEventListener("click", function (e) {
+  if (menuOpen && !actionMenu.contains(e.target)) closeRowMenu();
+});
+window.addEventListener("scroll", closeRowMenu, true);
+window.addEventListener("resize", closeRowMenu);
+
+/* ---------- Mutations ---------- */
+async function commit(promise) {
+  const data = await promise;      // full backlog on success
+  state.items = data.items;
+  refresh();
+  return data;
+}
+async function doDiscard(item) {
+  try {
+    await commit(api("DELETE", "/api/items/" + encodeURIComponent(item.id) + "?mode=discard"));
+  } catch (e) { alert("Could not discard " + item.id + ":\n" + e.message); }
+}
+async function doDelete(item) {
+  if (!confirm("Permanently delete " + item.id + " (" + item.name + ")?\nThis cannot be undone.")) return;
+  try {
+    await commit(api("DELETE", "/api/items/" + encodeURIComponent(item.id) + "?mode=hard"));
+  } catch (e) { alert("Could not delete " + item.id + ":\n" + e.message); }
+}
+
+/* ---------- Add / Edit modal ---------- */
+let modalState = null;
+
+function openModal(itemId) {
+  closeRowMenu();
+  const editing = itemId ? state.items.find(function (i) { return i.id === itemId; }) : null;
+  modalState = {
+    editingId: editing ? editing.id : null,
+    selectedDeps: new Set(editing ? (editing.dependencies || []) : []),
+    artifacts: editing ? (editing.artifacts || []).map(function (a) {
+      return { label: a.label, url: a.url };
+    }) : [],
+  };
+  const statusValues = schemaEnum("status", STATUS_FALLBACK);
+  const priorityValues = schemaEnum("priority", PRIORITY_FALLBACK);
+
+  const nameIn = h("input", { type: "text", id: "f-name", required: true,
+    value: editing ? editing.name : "", placeholder: "Short, shippable feature name" });
+  const descIn = h("textarea", { id: "f-desc", placeholder: "What is it and why?" });
+  descIn.value = editing ? (editing.description || "") : "";
+  const notesIn = h("textarea", { id: "f-notes", placeholder: "Context, soak reasons, decisions…" });
+  notesIn.value = editing ? (editing.notes || "") : "";
+
+  const statusSel = buildSelect(statusValues, editing ? editing.status : "new");
+  const prioritySel = buildSelect(priorityValues, editing ? editing.priority : "medium");
+
+  const dateIn = h("input", { type: "date", id: "f-dnbb",
+    value: editing ? (editing.doNotBuildBefore || "") : "" });
+  const clearDate = h("button", { class: "btn ghost", type: "button",
+    onClick: function () { dateIn.value = ""; } }, "Clear");
+
+  const depPicker = buildDepPicker(modalState.editingId);
+  const artWrap = h("div", { class: "artifacts" });
+  const errBox = h("div", { class: "modal-error" });
+
+  function rebuildArtifacts() {
+    artWrap.textContent = "";
+    modalState.artifacts.forEach(function (a, idx) {
+      const labelIn = h("input", { type: "text", class: "label-in", placeholder: "label",
+        value: a.label || "", oninput: function (e) { modalState.artifacts[idx].label = e.target.value; } });
+      const urlIn = h("input", { type: "text", placeholder: "url or path",
+        value: a.url || "", oninput: function (e) { modalState.artifacts[idx].url = e.target.value; } });
+      const rm = h("button", { class: "art-remove", type: "button", "aria-label": "Remove artifact",
+        onClick: function () { modalState.artifacts.splice(idx, 1); rebuildArtifacts(); } }, "✕");
+      artWrap.append(h("div", { class: "art-row" }, labelIn, urlIn, rm));
+    });
+    artWrap.append(h("button", { class: "btn ghost art-add", type: "button",
+      onClick: function () { modalState.artifacts.push({ label: "", url: "" }); rebuildArtifacts(); } },
+      "+ Add artifact"));
+  }
+  rebuildArtifacts();
+
+  function field(labelText, control, required) {
+    return h("div", { class: "field" },
+      h("label", null, labelText, required ? h("span", { class: "req" }, "*") : null),
+      control);
+  }
+
+  const form = h("form", { onSubmit: function (e) { e.preventDefault(); saveModal({
+    nameIn: nameIn, descIn: descIn, notesIn: notesIn, statusSel: statusSel,
+    prioritySel: prioritySel, dateIn: dateIn, errBox: errBox }); } },
+    errBox,
+    field("Name", nameIn, true),
+    field("Description", descIn),
+    h("div", { class: "grid-2" },
+      field("Status", statusSel),
+      field("Priority", prioritySel)),
+    field("Do not build before", h("div", { class: "date-row" }, dateIn, clearDate)),
+    field("Dependencies", depPicker),
+    field("Notes", notesIn),
+    field("Artifacts", artWrap)
+  );
+
+  const root = document.getElementById("modal-root");
+  root.textContent = "";
+  const scrim = h("div", { class: "scrim",
+    onClick: function (e) { if (e.target === scrim) closeModal(); } },
+    h("div", { class: "modal", role: "dialog", "aria-modal": "true", "aria-label": editing ? "Edit item" : "New item" },
+      h("div", { class: "modal-head" },
+        h("div", null,
+          h("div", { class: "eyebrow" }, editing ? "Edit item" : "New item"),
+          h("h2", null, editing ? editing.id : "Untitled")),
+        h("button", { class: "x", type: "button", "aria-label": "Close", onClick: closeModal }, "✕")),
+      h("div", { class: "modal-body" }, form),
+      h("div", { class: "modal-foot" },
+        h("button", { class: "btn", type: "button", onClick: closeModal }, "Cancel"),
+        h("button", { class: "btn primary", type: "submit",
+          onClick: function () { form.requestSubmit(); } },
+          editing ? "Save changes" : "Add item"))
+    )
+  );
+  root.append(scrim);
+  setTimeout(function () { nameIn.focus(); }, 0);
+}
+
+function buildSelect(values, selected) {
+  const sel = h("select");
+  values.forEach(function (v) {
+    const opt = h("option", { value: v }, v);
+    if (v === selected) opt.selected = true;
+    sel.append(opt);
+  });
+  return sel;
+}
+
+function buildDepPicker(editingId) {
+  const box = h("div", { class: "dep-picker" });
+  const candidates = state.items.filter(function (i) { return i.id !== editingId; });
+  if (!candidates.length) {
+    box.append(h("span", { class: "empty-note" }, "No other items to depend on yet."));
+    return box;
+  }
+  candidates.forEach(function (it) {
+    const ready = it.status === "shipped";
+    const btn = h("button", { class: "dep-toggle " + (ready ? "ready" : "wait"), type: "button",
+      title: it.name + " — " + it.status,
+      onClick: function () {
+        if (modalState.selectedDeps.has(it.id)) modalState.selectedDeps.delete(it.id);
+        else modalState.selectedDeps.add(it.id);
+        btn.classList.toggle("on");
+        btn.setAttribute("aria-pressed", btn.classList.contains("on") ? "true" : "false");
+      } },
+      h("span", { class: "dot" }), it.id);
+    if (modalState.selectedDeps.has(it.id)) btn.classList.add("on");
+    btn.setAttribute("aria-pressed", modalState.selectedDeps.has(it.id) ? "true" : "false");
+    box.append(btn);
+  });
+  return box;
+}
+
+function closeModal() {
+  document.getElementById("modal-root").textContent = "";
+  modalState = null;
+}
+
+async function saveModal(f) {
+  const body = {
+    name: f.nameIn.value.trim(),
+    description: f.descIn.value,
+    notes: f.notesIn.value,
+    status: f.statusSel.value,
+    priority: f.prioritySel.value,
+    dependencies: Array.from(modalState.selectedDeps),
+    doNotBuildBefore: f.dateIn.value || null,
+    // Drop fully-empty artifact rows; partial rows are sent so the
+    // server reports the precise validation error inline.
+    artifacts: modalState.artifacts
+      .filter(function (a) { return (a.label || "").trim() || (a.url || "").trim(); })
+      .map(function (a) { return { label: (a.label || "").trim(), url: (a.url || "").trim() }; }),
+  };
+  try {
+    let data;
+    if (modalState.editingId) {
+      data = await api("PATCH", "/api/items/" + encodeURIComponent(modalState.editingId), body);
+    } else {
+      data = await api("POST", "/api/items", body);
+    }
+    state.items = data.items;
+    closeModal();
+    refresh();
+  } catch (e) {
+    showModalError(f.errBox, e.message);
+  }
+}
+function showModalError(errBox, msg) {
+  errBox.textContent = "";
+  errBox.append(h("span", { class: "etitle" }, "Could not save. "), msg);
+  errBox.classList.add("show");
+  errBox.scrollIntoView({ block: "nearest" });
+}
+
+/* ---------- Theme toggle (exercises the :root[data-theme] hook) ---------- */
+function currentTheme() {
+  const explicit = document.documentElement.getAttribute("data-theme");
+  if (explicit) return explicit;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+function initTheme() {
+  let saved = null;
+  try { saved = localStorage.getItem("pb-theme"); } catch (_) {}
+  if (saved === "light" || saved === "dark") {
+    document.documentElement.setAttribute("data-theme", saved);
+  }
+  document.getElementById("theme-toggle").addEventListener("click", function () {
+    const next = currentTheme() === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("pb-theme", next); } catch (_) {}
+  });
+}
+
+/* ---------- Boot ---------- */
+async function boot() {
+  initTheme();
+
+  document.getElementById("new-btn").addEventListener("click", function () { openModal(null); });
+  const searchInput = document.getElementById("search");
+  searchInput.addEventListener("input", function (e) {
+    state.search = e.target.value; renderBody();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { if (menuOpen) closeRowMenu(); else if (modalState) closeModal(); }
+  });
+
+  try {
+    const [schema, backlog] = await Promise.all([
+      api("GET", "/api/schema"),
+      api("GET", "/api/backlog"),
+    ]);
+    state.schema = schema;
+    state.items = backlog.items || [];
+    state.statusValues = schemaEnum("status", STATUS_FALLBACK);
+    state.priorityValues = schemaEnum("priority", PRIORITY_FALLBACK);
+  } catch (e) {
+    document.getElementById("table-wrap").innerHTML = "";
+    const wrap = document.getElementById("table-wrap");
+    wrap.append(h("div", { class: "empty" },
+      h("div", { class: "big" }, "Could not reach the backlog server"),
+      h("div", { class: "sub" }, e.message)));
+    return;
+  }
+
+  buildChips();
+  buildHead();
+  refresh();
+}
+
+boot();
 </script>
 </body>
 </html>
