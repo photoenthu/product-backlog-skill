@@ -1,7 +1,7 @@
 {
   "name": "product-backlog",
-  "description": "Maintain a per-project Product Backlog (docs/backlog/product-backlog.md) plus a self-contained HTML dashboard, by analyzing each Claude session for shipped, in-progress, and pending work.",
-  "version": "0.2.0",
+  "description": "Bundles two Product Backlog skills: the original markdown-table backlog (docs/backlog/product-backlog.md) with a self-contained HTML dashboard, and a new JSON-backed backlog (docs/backlog/product-backlog.json) governed by a strict JSON Schema, mutated only through a deterministic Python CLI, with a live localhost HTML editor. Both analyze each Claude session for shipped, in-progress, and pending work.",
+  "version": "0.3.0",
   "author": {
     "name": "photoenthu"
   },
@@ -13,6 +13,8 @@
     "product-management",
     "backlog",
     "session-summary",
-    "claude-code"
+    "claude-code",
+    "json",
+    "editor"
   ]
 }
