@@ -228,3 +228,131 @@ def _validate_integrity(items: list) -> list[str]:
         problems.append(f"dependency cycle involving: {', '.join(sorted(cyclic))}")
 
     return problems
+
+
+def _find_index(data: dict, item_id: str) -> int:
+    for i, item in enumerate(data.get("items", [])):
+        if item.get("id") == item_id:
+            return i
+    raise BacklogError(f"no item with id {item_id}")
+
+
+def _ordered(item: dict) -> dict:
+    """Return the item with keys in canonical ITEM_KEYS order."""
+    return {k: item[k] for k in ITEM_KEYS}
+
+
+def add_item(
+    data: dict,
+    *,
+    name: str,
+    description: str = "",
+    status: str = DEFAULT_STATUS,
+    priority: str = DEFAULT_PRIORITY,
+    dependencies: list | None = None,
+    do_not_build_before: str | None = None,
+    notes: str = "",
+    artifacts: list | None = None,
+    _now: str | None = None,
+) -> dict:
+    """Build, validate, and append a new item. Raises BacklogError (leaving
+    `data` untouched) if the result would be invalid. Returns the new item."""
+    stamp = _now or now_iso()
+    item = {
+        "id": next_id(data),
+        "name": name,
+        "description": description,
+        "status": status,
+        "priority": priority,
+        "dependencies": list(dependencies or []),
+        "doNotBuildBefore": do_not_build_before,
+        "artifacts": list(artifacts or []),
+        "notes": notes,
+        "createdAt": stamp,
+        "updatedAt": stamp,
+    }
+    candidate = {"schemaVersion": data.get("schemaVersion", SCHEMA_VERSION),
+                 "items": list(data.get("items", [])) + [item]}
+    problems = validate(candidate)
+    if problems:
+        raise BacklogError("cannot add item:\n  - " + "\n  - ".join(problems))
+    data["items"].append(_ordered(item))
+    return data["items"][-1]
+
+
+_EDITABLE = {
+    "name": "name", "description": "description", "status": "status",
+    "priority": "priority", "dependencies": "dependencies",
+    "do_not_build_before": "doNotBuildBefore", "notes": "notes",
+    "artifacts": "artifacts",
+}
+_UNSET = object()
+
+
+def edit_item(
+    data: dict,
+    item_id: str,
+    *,
+    name=_UNSET, description=_UNSET, status=_UNSET, priority=_UNSET,
+    dependencies=_UNSET, do_not_build_before=_UNSET, notes=_UNSET, artifacts=_UNSET,
+    _updated_at: str | None = None,
+) -> dict:
+    """Apply only the passed fields to an existing item, bump updatedAt,
+    validate the whole file, and commit the change in memory. Raises on unknown
+    id or if the edit would make the file invalid (item left unchanged)."""
+    idx = _find_index(data, item_id)
+    current = dict(data["items"][idx])
+    changes = {
+        "name": name, "description": description, "status": status,
+        "priority": priority, "dependencies": dependencies,
+        "do_not_build_before": do_not_build_before, "notes": notes,
+        "artifacts": artifacts,
+    }
+    for kwarg, value in changes.items():
+        if value is not _UNSET:
+            current[_EDITABLE[kwarg]] = value
+    current["updatedAt"] = _updated_at or now_iso()
+
+    candidate_items = list(data["items"])
+    candidate_items[idx] = current
+    problems = validate({"schemaVersion": data["schemaVersion"], "items": candidate_items})
+    if problems:
+        raise BacklogError("cannot edit item:\n  - " + "\n  - ".join(problems))
+    data["items"][idx] = _ordered(current)
+    return data["items"][idx]
+
+
+def discard_item(data: dict, item_id: str, notes: str | None = None, _now: str | None = None) -> dict:
+    kwargs = {"status": "discarded", "_updated_at": _now}
+    if notes is not None:
+        kwargs["notes"] = notes
+    return edit_item(data, item_id, **kwargs)
+
+
+def remove_item(data: dict, item_id: str, force: bool = False) -> None:
+    """Hard-delete an item. Refuses if other items depend on it unless force."""
+    idx = _find_index(data, item_id)
+    if not force:
+        dependents = [
+            it["id"] for it in data["items"]
+            if it["id"] != item_id and item_id in it.get("dependencies", [])
+        ]
+        if dependents:
+            raise BacklogError(
+                f"cannot remove {item_id}: depended on by {', '.join(dependents)} "
+                f"(use force to override)"
+            )
+    del data["items"][idx]
+
+
+def get_item(data: dict, item_id: str) -> dict:
+    return data["items"][_find_index(data, item_id)]
+
+
+def list_items(data: dict, status: str | None = None, priority: str | None = None) -> list:
+    out = data.get("items", [])
+    if status is not None:
+        out = [i for i in out if i.get("status") == status]
+    if priority is not None:
+        out = [i for i in out if i.get("priority") == priority]
+    return list(out)

@@ -159,5 +159,93 @@ class IntegrityTest(unittest.TestCase):
         self.assertEqual(problems, [])
 
 
+class MutationTest(unittest.TestCase):
+    def _empty(self):
+        return {"schemaVersion": 1, "items": []}
+
+    def test_add_assigns_id_and_defaults_and_timestamps(self):
+        data = self._empty()
+        item = core.add_item(data, name="First feature")
+        self.assertEqual(item["id"], "BL-001")
+        self.assertEqual(item["status"], "new")
+        self.assertEqual(item["priority"], "medium")
+        self.assertEqual(item["dependencies"], [])
+        self.assertIsNone(item["doNotBuildBefore"])
+        self.assertEqual(item["createdAt"], item["updatedAt"])
+        self.assertEqual(core.validate(data), [])
+
+    def test_add_with_all_fields(self):
+        data = self._empty()
+        core.add_item(data, name="A")
+        item = core.add_item(
+            data, name="B", description="d", status="pending", priority="high",
+            dependencies=["BL-001"], do_not_build_before="2026-08-01",
+            notes="soak", artifacts=[{"label": "plan", "url": "docs/p.md"}],
+        )
+        self.assertEqual(item["id"], "BL-002")
+        self.assertEqual(item["dependencies"], ["BL-001"])
+        self.assertEqual(item["artifacts"], [{"label": "plan", "url": "docs/p.md"}])
+        self.assertEqual(core.validate(data), [])
+
+    def test_add_rejects_invalid_immediately(self):
+        data = self._empty()
+        with self.assertRaises(core.BacklogError):
+            core.add_item(data, name="B", dependencies=["BL-999"])
+        self.assertEqual(data["items"], [])  # not appended on failure
+
+    def test_edit_changes_only_passed_fields_and_bumps_updated(self):
+        data = self._empty()
+        core.add_item(data, name="A")
+        before = data["items"][0]["updatedAt"]
+        item = core.edit_item(data, "BL-001", status="shipped", _updated_at="LATER")
+        self.assertEqual(item["status"], "shipped")
+        self.assertEqual(item["name"], "A")
+        self.assertEqual(item["updatedAt"], "LATER")
+        self.assertNotEqual(item["updatedAt"], before)
+
+    def test_edit_unknown_id_raises(self):
+        data = self._empty()
+        with self.assertRaises(core.BacklogError):
+            core.edit_item(data, "BL-404", status="shipped")
+
+    def test_edit_clear_dnbb(self):
+        data = self._empty()
+        core.add_item(data, name="A", do_not_build_before="2026-08-01")
+        item = core.edit_item(data, "BL-001", do_not_build_before=None)
+        self.assertIsNone(item["doNotBuildBefore"])
+
+    def test_discard_sets_status(self):
+        data = self._empty()
+        core.add_item(data, name="A")
+        item = core.discard_item(data, "BL-001", notes="not worth it")
+        self.assertEqual(item["status"], "discarded")
+        self.assertEqual(item["notes"], "not worth it")
+
+    def test_remove_deletes(self):
+        data = self._empty()
+        core.add_item(data, name="A")
+        core.remove_item(data, "BL-001")
+        self.assertEqual(data["items"], [])
+
+    def test_remove_blocked_by_dependents(self):
+        data = self._empty()
+        core.add_item(data, name="A")
+        core.add_item(data, name="B", dependencies=["BL-001"])
+        with self.assertRaises(core.BacklogError):
+            core.remove_item(data, "BL-001")
+        core.remove_item(data, "BL-001", force=True)  # force succeeds
+        self.assertEqual(len(data["items"]), 1)
+
+    def test_get_and_list(self):
+        data = self._empty()
+        core.add_item(data, name="A", status="pending", priority="high")
+        core.add_item(data, name="B", status="shipped", priority="low")
+        self.assertEqual(core.get_item(data, "BL-001")["name"], "A")
+        pend = core.list_items(data, status="pending")
+        self.assertEqual([i["id"] for i in pend], ["BL-001"])
+        high = core.list_items(data, priority="high")
+        self.assertEqual([i["id"] for i in high], ["BL-001"])
+
+
 if __name__ == "__main__":
     unittest.main()
