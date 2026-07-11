@@ -61,7 +61,10 @@ def make_handler(path: Path):
             self.wfile.write(body)
 
         def _read_body(self) -> dict:
-            length = int(self.headers.get("Content-Length") or 0)
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except (TypeError, ValueError):
+                raise core.BacklogError("invalid Content-Length header")
             if length == 0:
                 return {}
             raw = self.rfile.read(length)
@@ -77,11 +80,20 @@ def make_handler(path: Path):
         def do_GET(self):
             route = urlparse(self.path).path
             if route == "/":
-                self._send_file(200, EDITOR_HTML.read_bytes(), "text/html; charset=utf-8")
+                try:
+                    self._send_file(200, EDITOR_HTML.read_bytes(), "text/html; charset=utf-8")
+                except (core.BacklogError, OSError) as e:
+                    self._send_file(500, str(e).encode("utf-8"), "text/plain; charset=utf-8")
             elif route == "/api/backlog":
-                self._send_json(200, core.load(path))
+                try:
+                    self._send_json(200, core.load(path))
+                except (core.BacklogError, OSError) as e:
+                    self._send_json(400, {"error": str(e)})
             elif route == "/api/schema":
-                self._send_file(200, SCHEMA_PATH.read_bytes(), "application/json")
+                try:
+                    self._send_file(200, SCHEMA_PATH.read_bytes(), "application/json")
+                except (core.BacklogError, OSError) as e:
+                    self._send_json(400, {"error": str(e)})
             else:
                 self._send_json(404, {"error": "not found"})
 
