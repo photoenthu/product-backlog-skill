@@ -315,7 +315,7 @@ def edit_item(
 
     candidate_items = list(data["items"])
     candidate_items[idx] = current
-    problems = validate({"schemaVersion": data["schemaVersion"], "items": candidate_items})
+    problems = validate({"schemaVersion": data.get("schemaVersion", SCHEMA_VERSION), "items": candidate_items})
     if problems:
         raise BacklogError("cannot edit item:\n  - " + "\n  - ".join(problems))
     data["items"][idx] = _ordered(current)
@@ -332,16 +332,22 @@ def discard_item(data: dict, item_id: str, notes: str | None = None, _now: str |
 def remove_item(data: dict, item_id: str, force: bool = False) -> None:
     """Hard-delete an item. Refuses if other items depend on it unless force."""
     idx = _find_index(data, item_id)
-    if not force:
-        dependents = [
-            it["id"] for it in data["items"]
-            if it["id"] != item_id and item_id in it.get("dependencies", [])
-        ]
-        if dependents:
-            raise BacklogError(
-                f"cannot remove {item_id}: depended on by {', '.join(dependents)} "
-                f"(use force to override)"
-            )
+    dependents = [
+        it["id"] for it in data["items"]
+        if it["id"] != item_id and item_id in it.get("dependencies", [])
+    ]
+    if dependents and not force:
+        raise BacklogError(
+            f"cannot remove {item_id}: depended on by {', '.join(dependents)} "
+            f"(use force to override)"
+        )
+    if force:
+        # Strip the id from every other item's dependencies so the result
+        # stays savable (no dangling references).
+        for it in data["items"]:
+            deps = it.get("dependencies")
+            if isinstance(deps, list) and item_id in deps:
+                it["dependencies"] = [d for d in deps if d != item_id]
     del data["items"][idx]
 
 

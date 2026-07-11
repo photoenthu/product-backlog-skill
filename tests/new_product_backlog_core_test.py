@@ -236,6 +236,21 @@ class MutationTest(unittest.TestCase):
         core.remove_item(data, "BL-001", force=True)  # force succeeds
         self.assertEqual(len(data["items"]), 1)
 
+    def test_force_remove_strips_dangling_deps(self):
+        data = self._empty()
+        core.add_item(data, name="A")
+        core.add_item(data, name="B", dependencies=["BL-001"])
+        core.remove_item(data, "BL-001", force=True)
+        self.assertEqual(core.validate(data), [])
+        self.assertEqual(core.get_item(data, "BL-002")["dependencies"], [])
+
+    def test_edit_invalid_leaves_item_unchanged(self):
+        data = self._empty()
+        core.add_item(data, name="A", status="new")
+        with self.assertRaises(core.BacklogError):
+            core.edit_item(data, "BL-001", status="done")  # bad enum
+        self.assertEqual(core.get_item(data, "BL-001")["status"], "new")
+
     def test_get_and_list(self):
         data = self._empty()
         core.add_item(data, name="A", status="pending", priority="high")
