@@ -208,6 +208,8 @@ The editor is a self-contained page (inline CSS/JS, no CDN, theme-aware) that li
 
 Critically, the browser **never writes to disk**: every mutation POSTs/PATCHes/DELETEs to the local server, which routes through the same validating `core` functions the CLI uses and returns the authoritative backlog for the page to re-render. So the editor is a **safe manual path** — it can't produce an invalid file any more than the CLI can. The server binds **127.0.0.1 only** (no auth, single local user, not reachable from the network).
 
+One deliberate asymmetry with the CLI: the editor's **hard-delete always forces** (like `rm --force`). Deleting an item that others depend on will succeed and strip that id from every dependent's `dependencies` list — it never refuses the way `rm` does without `--force`. Discard (the default action) is the non-destructive choice; reach for hard-delete only when you mean it.
+
 ## Commit prompt
 
 After all writes are done, surface this **once** at the end:
