@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Marketplace for two Product Backlog skills: a markdown-table backlog with HTML dashboard, and a JSON-backed backlog with a strict schema and a live HTML editor, both driven from Claude session activity. The JSON-backed backlog's CLI can also be called as a subprocess from other skills for cross-skill/cross-project integration.",
-    "version": "0.4.0"
+    "version": "0.4.1"
   },
   "plugins": [
     {
@@ -14,8 +14,8 @@
         "source": "url",
         "url": "https://github.com/photoenthu/product-backlog-skill.git"
       },
-      "description": "Analyzes the current Claude session — git commits, plans, PRDs, opportunities-marked-DONE, conversational signals — and updates docs/backlog/product-backlog.md with atomic rows, status sections, stable IDs, and append-only artifact links. Also bootstraps a self-contained HTML dashboard (regenerated only on template version bumps) and offers a commit/push prompt at the end. Bundles a second skill, new-product-backlog, which keeps a strict JSON-Schema-validated docs/backlog/product-backlog.json, mutated only through a pure-stdlib Python CLI (init/add/edit/discard/rm/get/list/find/validate/default-path), with a live localhost HTML editor for manual add/edit/filter/search and a subprocess-callable interface for other skills to integrate with.",
-      "version": "0.4.0",
+      "description": "Analyzes the current Claude session \u2014 git commits, plans, PRDs, opportunities-marked-DONE, conversational signals \u2014 and updates docs/backlog/product-backlog.md with atomic rows, status sections, stable IDs, and append-only artifact links. Also bootstraps a self-contained HTML dashboard (regenerated only on template version bumps) and offers a commit/push prompt at the end. Bundles a second skill, new-product-backlog, which keeps a strict JSON-Schema-validated docs/backlog/product-backlog.json, mutated only through a pure-stdlib Python CLI (init/add/edit/discard/rm/get/list/find/validate/default-path), with a live localhost HTML editor for manual add/edit/filter/search and a subprocess-callable interface for other skills to integrate with.",
+      "version": "0.4.1",
       "strict": true
     }
   ]
