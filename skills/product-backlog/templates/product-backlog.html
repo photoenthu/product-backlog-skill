@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Product Backlog</title>
-<!-- product-backlog-dashboard-version: 5 -->
+<!-- product-backlog-dashboard-version: 6 -->
 <style>
   :root {
     color-scheme: light dark;
@@ -137,6 +137,33 @@
     border-color: var(--accent);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
   }
+  .priority-filter { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .priority-filter .pf-label {
+    font-size: 12px;
+    color: var(--fg-muted);
+    margin-right: 2px;
+  }
+  .pchip {
+    font: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 4px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--fg-subtle);
+    cursor: pointer;
+    opacity: 0.55;
+    transition: opacity 0.15s, background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  .pchip:hover { opacity: 1; border-color: var(--fg-muted); }
+  .pchip.active { opacity: 1; }
+  .pchip.critical.active { color: var(--priority-critical); background: var(--priority-critical-bg); border-color: transparent; }
+  .pchip.high.active { color: var(--priority-high); background: var(--priority-high-bg); border-color: transparent; }
+  .pchip.medium.active { color: var(--priority-medium); background: var(--priority-medium-bg); border-color: transparent; }
+  .pchip.low.active { color: var(--priority-low); background: var(--priority-low-bg); border-color: transparent; }
   .counts { display: flex; gap: 8px; flex-wrap: wrap; }
   .badge {
     display: inline-flex;
@@ -318,6 +345,13 @@
       <div class="filter">
         <input type="search" id="filterInput" placeholder="Filter by id, title, summary, notes…" autocomplete="off">
       </div>
+      <div class="priority-filter" id="priorityFilter">
+        <span class="pf-label">Priority:</span>
+        <button type="button" class="pchip critical active" data-priority="Critical">Critical</button>
+        <button type="button" class="pchip high active" data-priority="High">High</button>
+        <button type="button" class="pchip medium active" data-priority="Medium">Medium</button>
+        <button type="button" class="pchip low active" data-priority="Low">Low</button>
+      </div>
       <div class="counts" id="counts"></div>
     </div>
 
@@ -354,6 +388,7 @@
     emptyState: document.getElementById("emptyState"),
     dashboard: document.getElementById("dashboard"),
     filterInput: document.getElementById("filterInput"),
+    priorityFilter: document.getElementById("priorityFilter"),
     counts: document.getElementById("counts"),
     errorBanner: document.getElementById("errorBanner"),
     sections: {
@@ -386,6 +421,14 @@
   let currentRows = [];
   let currentFilter = "";
   let projectDirHandle = null;
+
+  // Priority filter state. All four selected (the default) means the filter is
+  // inactive — every row passes, including the unprioritized Shipped rows that
+  // never carry a priority tag. Deselecting any chip activates the filter: a
+  // row then passes only if it has a priority in the active set, so
+  // unprioritized rows (all of Shipped) drop out. Empty set => nothing passes.
+  const ALL_PRIORITIES = ["Critical", "High", "Medium", "Low"];
+  const activePriorities = new Set(ALL_PRIORITIES);
 
   // ---------- IndexedDB helpers (for FileSystemFileHandle) ----------
   function openDb() {
@@ -892,11 +935,22 @@
     return haystack.includes(q);
   }
 
+  // True when `row` passes the priority chip filter. When all four chips are
+  // active the filter is off and everything passes (unprioritized included).
+  // Otherwise only rows whose parsed priority is in the active set pass — so
+  // unprioritized rows (all Shipped rows) are hidden while a subset is active.
+  function rowMatchesPriority(row) {
+    if (activePriorities.size === ALL_PRIORITIES.length) return true;
+    const { priority } = parseFeatureCell(row.feature);
+    if (!priority) return false;
+    return activePriorities.has(priority);
+  }
+
   function renderRows(sections) {
     const q = currentFilter.trim().toLowerCase();
     for (const key of ["in-progress", "pending", "shipped"]) {
       const container = els.sections[key];
-      const rows = sections[key].filter((r) => rowMatchesFilter(r, q));
+      const rows = sections[key].filter((r) => rowMatchesFilter(r, q) && rowMatchesPriority(r));
       const section = container.closest("section");
       if (rows.length === 0) {
         section.classList.add("empty");
@@ -1082,6 +1136,19 @@
   });
   els.filterInput.addEventListener("input", (e) => {
     currentFilter = e.target.value;
+    if (currentRows && currentRows["in-progress"]) renderRows(currentRows);
+  });
+  els.priorityFilter.addEventListener("click", (e) => {
+    const chip = e.target.closest(".pchip");
+    if (!chip) return;
+    const p = chip.dataset.priority;
+    if (activePriorities.has(p)) {
+      activePriorities.delete(p);
+      chip.classList.remove("active");
+    } else {
+      activePriorities.add(p);
+      chip.classList.add("active");
+    }
     if (currentRows && currentRows["in-progress"]) renderRows(currentRows);
   });
 

@@ -291,6 +291,7 @@ The dashboard:
 
 - Renders three sections (In-Progress / Pending / Shipped) matching the markdown's structure.
 - Shows count badges and a single search box that filters across id / title / summary / notes / artifacts.
+- Offers a priority filter: four multi-select chips (Critical / High / Medium / Low), all active by default. Deselecting any chip narrows the view to rows whose derived priority is still selected; while a subset is active, unprioritized rows (all Shipped rows, which never carry a priority tag) are hidden. The priority filter and the search box compose (both must match). Re-selecting all four chips clears the filter and restores every row.
 - Renders artifact cells with clickable links and inline-code commit hashes.
 - Is fully self-contained — no CDN, no external CSS, no external JS. Works offline.
 - Honors the OS's light/dark color scheme via `prefers-color-scheme`.
