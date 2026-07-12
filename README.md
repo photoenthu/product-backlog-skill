@@ -219,7 +219,9 @@ python3 skills/new-product-backlog/scripts/backlog.py serve docs/backlog/product
 
 If the requested port is busy, `serve` scans upward to the next free port automatically and prints the URL it actually bound to.
 
-The server binds `127.0.0.1` only — no auth, single local user, not reachable from the network. The page itself is a self-contained HTML file (inline CSS/JS, no CDN, theme-aware) that lists all items and supports add/edit, delete (discard by default, hard-delete as an explicit option), column sort, multi-select status/priority filter chips, and text search across id/name/description/notes. It also warns when a dependency isn't yet `shipped`, or when `doNotBuildBefore` is in the future.
+The server binds `127.0.0.1` only — no auth, single local user, not reachable from the network. The page itself is a self-contained HTML file (inline CSS/JS, no CDN, theme-aware) that lists all items and supports add/edit, delete (discard by default, hard-delete as an explicit option), column sort, multi-select status/priority filter chips, and text search across id/name/description/notes. Rows expand to show the full description, notes, and artifact links, and it warns when a dependency isn't yet `shipped`, or when `doNotBuildBefore` is in the future. Filter/sort/search state persists across refreshes (per-backlog).
+
+Artifact links: full `http(s)://` URLs open externally; relative in-repo paths (e.g. `docs/plans/foo.md`) are served from the project root via a traversal-safe `/file` route so they open in the browser (HTML/SVG served as inert `text/plain`).
 
 ## How it differs from `product-backlog`
 
