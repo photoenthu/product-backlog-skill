@@ -272,6 +272,58 @@ class MutationTest(unittest.TestCase):
         self.assertEqual([i["id"] for i in high], ["BL-001"])
 
 
+class FindTest(unittest.TestCase):
+    def _data(self):
+        data = {"schemaVersion": 1, "items": []}
+        core.add_item(data, name="Alpha login", status="new", priority="high",
+                      artifacts=[{"label": "spec", "url": "docs/alpha-spec.md"}])
+        core.add_item(data, name="Beta signup", status="pending", priority="low",
+                      dependencies=["BL-001"])
+        core.add_item(data, name="Gamma alpha export", status="shipped", priority="high")
+        return data
+
+    def test_filter_by_name_contains_case_insensitive(self):
+        data = self._data()
+        found = core.find_items(data, name_contains="ALPHA")
+        self.assertEqual({i["id"] for i in found}, {"BL-001", "BL-003"})
+
+    def test_filter_by_status(self):
+        data = self._data()
+        found = core.find_items(data, status="pending")
+        self.assertEqual([i["id"] for i in found], ["BL-002"])
+
+    def test_filter_by_priority(self):
+        data = self._data()
+        found = core.find_items(data, priority="high")
+        self.assertEqual({i["id"] for i in found}, {"BL-001", "BL-003"})
+
+    def test_filter_by_artifact_url_case_insensitive(self):
+        data = self._data()
+        found = core.find_items(data, artifact_url="ALPHA-SPEC")
+        self.assertEqual([i["id"] for i in found], ["BL-001"])
+
+    def test_filter_by_depends_on(self):
+        data = self._data()
+        found = core.find_items(data, depends_on="BL-001")
+        self.assertEqual([i["id"] for i in found], ["BL-002"])
+
+    def test_composition_of_two_filters_is_and(self):
+        data = self._data()
+        found = core.find_items(data, name_contains="alpha", priority="high")
+        self.assertEqual({i["id"] for i in found}, {"BL-001", "BL-003"})
+        found2 = core.find_items(data, name_contains="alpha", status="shipped")
+        self.assertEqual([i["id"] for i in found2], ["BL-003"])
+
+    def test_empty_result_when_nothing_matches(self):
+        data = self._data()
+        self.assertEqual(core.find_items(data, name_contains="zzz"), [])
+
+    def test_no_filters_returns_all(self):
+        data = self._data()
+        found = core.find_items(data)
+        self.assertEqual(len(found), 3)
+
+
 class CliTest(unittest.TestCase):
     def test_init_add_list_edit_discard_roundtrip(self):
         with TempBacklog() as t:

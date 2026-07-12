@@ -362,3 +362,36 @@ def list_items(data: dict, status: str | None = None, priority: str | None = Non
     if priority is not None:
         out = [i for i in out if i.get("priority") == priority]
     return list(out)
+
+
+def find_items(
+    data: dict,
+    *,
+    name_contains: str | None = None,
+    status: str | None = None,
+    priority: str | None = None,
+    artifact_url: str | None = None,
+    depends_on: str | None = None,
+) -> list:
+    """Return items matching ALL provided filters (AND). Omitted filters (None)
+    are ignored. name_contains: case-insensitive substring of name.
+    status/priority: exact match. artifact_url: case-insensitive substring of
+    any artifact's url. depends_on: the given id is in the item's
+    dependencies."""
+    out = data.get("items", [])
+    if name_contains is not None:
+        needle = name_contains.lower()
+        out = [i for i in out if needle in i.get("name", "").lower()]
+    if status is not None:
+        out = [i for i in out if i.get("status") == status]
+    if priority is not None:
+        out = [i for i in out if i.get("priority") == priority]
+    if artifact_url is not None:
+        needle = artifact_url.lower()
+        out = [
+            i for i in out
+            if any(needle in a.get("url", "").lower() for a in i.get("artifacts", []))
+        ]
+    if depends_on is not None:
+        out = [i for i in out if depends_on in i.get("dependencies", [])]
+    return list(out)
