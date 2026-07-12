@@ -91,6 +91,15 @@ python3 <skill-dir>/scripts/backlog.py get docs/backlog/product-backlog.json BL-
 # Print items as a JSON array, optionally filtered by status and/or priority.
 python3 <skill-dir>/scripts/backlog.py list docs/backlog/product-backlog.json --status pending --priority high
 
+# Query for matching items (JSON array). Filters AND together; all optional:
+#   --name-contains (case-insensitive substring), --status, --priority,
+#   --artifact-url (substring of any artifact url), --depends-on BL-NNN.
+python3 <skill-dir>/scripts/backlog.py find docs/backlog/product-backlog.json --name-contains "router" --status pending
+
+# Print the conventional backlog path for a repo: <root|git-root|cwd>/docs/backlog/product-backlog.json
+python3 <skill-dir>/scripts/backlog.py default-path            # uses the current git root
+python3 <skill-dir>/scripts/backlog.py default-path --root /path/to/project
+
 # Full schema + referential-integrity check. Prints "ok: <path>" and exits 0 if clean;
 # prints problems to stderr and exits 1 otherwise.
 python3 <skill-dir>/scripts/backlog.py validate docs/backlog/product-backlog.json
@@ -106,6 +115,8 @@ python3 <skill-dir>/scripts/backlog.py serve docs/backlog/product-backlog.json -
 ```
 
 `--status` and `--priority` are validated by argparse against the enums, so a typo like `--status done` fails fast with a usage error before any file is touched.
+
+Two conveniences aimed at scripted/other-skill callers (see "Integration" below): **`add` auto-creates** the file and `docs/backlog/` directories if they don't exist, so the first `add` bootstraps the store; and `add`/`edit`/`discard`/`rm` accept **`--json`** to print the affected item as JSON (`rm --json` prints `{"removed": "<id>"}`) instead of the human string. `backlog.py --version` prints the CLI version.
 
 ## Session-analysis workflow
 
