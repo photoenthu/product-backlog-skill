@@ -200,6 +200,16 @@ python3 skills/new-product-backlog/scripts/backlog.py now
 
 `--status` and `--priority` are validated by argparse against the enums, so a typo like `--status done` fails fast with a usage error before any file is touched.
 
+### Newer commands: `find`, `default-path`, `--json`, `--version`
+
+- **`add` auto-initializes.** Calling `add` on a path whose file/dirs don't exist yet now bootstraps the store first (creates `docs/backlog/` and the JSON file), then adds the item — no separate `init` call required. `init` still exists and stays idempotent for consumers that prefer to bootstrap explicitly. `edit`/`discard`/`rm`/`get`/`list`/`validate` still require an existing file and exit 1 if it's missing.
+- **`--json`** on `add`/`edit`/`discard`/`rm` prints the affected item as JSON instead of the human-readable string (`rm --json` prints `{"removed": "<id>"}`); omitting it keeps the original plain-text output.
+- **`find <path> [--name-contains STR] [--status S] [--priority P] [--artifact-url STR] [--depends-on BL-NNN]`** prints items matching *all* given filters (AND-composed) as a JSON array — always JSON, no `--json` flag needed. Use it to check whether an item already exists before deciding to `add` or `edit`.
+- **`default-path [--root DIR]`** prints the canonical backlog path for the current project (`<root|git-root|cwd>/docs/backlog/product-backlog.json`), so scripts never have to hardcode the location.
+- **`--version`** (top-level flag) prints the CLI's own interface version, e.g. `new-product-backlog 1.0`.
+
+These are what make the skill callable as a subprocess from *other* skills (in this project or a different one) — see [`skills/new-product-backlog/SKILL.md`](skills/new-product-backlog/SKILL.md#integration-calling-this-skill-from-other-skills) for the full integration contract and a copy-pasteable add-or-update example.
+
 ## The editor
 
 ```bash

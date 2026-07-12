@@ -210,6 +210,54 @@ Critically, the browser **never writes to disk**: every mutation POSTs/PATCHes/D
 
 One deliberate asymmetry with the CLI: the editor's **hard-delete always forces** (like `rm --force`). Deleting an item that others depend on will succeed and strip that id from every dependent's `dependencies` list — it never refuses the way `rm` does without `--force`. Discard (the default action) is the non-destructive choice; reach for hard-delete only when you mean it.
 
+## Integration: calling this skill from other skills
+
+Other skills can drive this backlog too — not just the session-analysis workflow above. A `pr-from-backlog` skill that marks an item shipped when its PR merges, an `add-to-backlog` skill invoked from a completely different project (a trading bot, a web app, anything), or any other automation can mutate `product-backlog.json` by shelling out to `scripts/backlog.py`. This section is the contract for that.
+
+**The contract: subprocess only, never direct file access.** Exactly like the session-analysis workflow, a consuming skill must never read or write the JSON with its own Read/Edit/Write tools, `sed`, or hand-rolled JSON parsing-and-rewriting. It calls `scripts/backlog.py` as a subprocess and treats stdout/exit code as the interface. This is the same sole-writer guarantee (schema validation, referential integrity, atomic writes) — it just now extends across skill and project boundaries instead of being scoped to one session.
+
+**Locating the file: always resolved in the consuming project.** There is no shared or central backlog — every project gets its own `docs/backlog/product-backlog.json` under its own git root. Use the `default-path` subcommand instead of hardcoding `docs/backlog/product-backlog.json` or guessing at a root:
+
+```bash
+python3 <skill-dir>/scripts/backlog.py default-path
+# -> <git-root-of-cwd>/docs/backlog/product-backlog.json
+
+python3 <skill-dir>/scripts/backlog.py default-path --root /path/to/some/project
+# -> /path/to/some/project/docs/backlog/product-backlog.json
+```
+
+`default-path` resolves `--root` if given, else `git rev-parse --show-toplevel` run from the current working directory, else `cwd` — the identical resolution rule the session-analysis workflow uses by hand in step 1. Run it from (or point `--root` at) whatever project the consuming skill is actually working in; that's what keeps each project's backlog isolated from every other project's.
+
+**Bootstrapping: `add` self-initializes.** As of this version, `add` creates `docs/backlog/` and the JSON file (if missing) before adding the item — a consumer can call `add` directly on a brand-new project with no separate init step. `init` still exists and stays idempotent (a no-op if the file already exists) for consumers that prefer to bootstrap explicitly or want to create an empty file up front. `edit`, `discard`, `rm`, `get`, `list`, and `validate` still require the file to already exist and fail (exit 1) if it doesn't.
+
+**Machine-readable I/O.** Every command a script needs is scriptable without screen-scraping prose:
+
+- `add` prints the new item's id on stdout (e.g. `BL-014`); pass `--json` to print the full item object instead.
+- `edit`, `discard`, and `rm` print a short human string by default (`edited BL-014`, `discarded BL-005`, `removed BL-007`); pass `--json` on any of them to get the affected item as JSON instead (`rm --json` prints `{"removed": "BL-007"}`, since the item no longer exists to echo back).
+- `get`, `list`, and `find` always print JSON — a single item object for `get`, an array for `list`/`find`.
+- `find <path> [--name-contains STR] [--status S] [--priority P] [--artifact-url STR] [--depends-on BL-NNN]` returns items matching **all** of the given filters (AND-composed; omitted filters are ignored) as a JSON array — this is the query a consumer uses to check "does an item like this already exist" before deciding whether to `add` or `edit`.
+- Exit codes are consistent everywhere: `0` success, `1` a `BacklogError` (validation failure, referential-integrity violation, file not found), `2` a usage error (bad flags, missing required argument) — a consumer can branch on `$?` without parsing stderr.
+- `--version` (top-level flag) prints `new-product-backlog 1.0` — the CLI's own interface version, independent of the plugin/marketplace version — for a consumer that wants to guard against calling flags that don't exist yet in an older install.
+
+A concrete add-or-update flow, e.g. a `pr-from-backlog`-style skill that upserts an item by title:
+
+```bash
+BL="python3 /path/to/new-product-backlog/scripts/backlog.py"
+BACKLOG="$($BL default-path)"                 # resolves to THIS project's root
+
+# add-or-update: find by title, else add
+EXISTING=$($BL find "$BACKLOG" --name-contains "Regime router" | python3 -c 'import json,sys;m=json.load(sys.stdin);print(m[0]["id"] if m else "")')
+if [ -n "$EXISTING" ]; then
+  $BL edit "$BACKLOG" "$EXISTING" --status shipped --json
+else
+  $BL add "$BACKLOG" --name "Regime router" --priority high --json
+fi
+```
+
+**Locating the script.** `scripts/backlog.py` lives inside this skill's own install directory — wherever it was installed (a plugin cache path or a checked-out copy of this repo), not inside the consuming project. A consuming skill's instructions should tell the agent to resolve that path itself (the agent generally knows where its skills are installed) rather than this document guessing a path that only holds for one install layout.
+
+**CLI only — not `serve`.** `serve` starts an interactive localhost editor for a human to browse and click through; it is not meant to be driven by automation. Other skills and scripts should always call the `backlog.py` subcommands above directly, never spin up (or talk HTTP to) the `serve` server.
+
 ## Commit prompt
 
 After all writes are done, surface this **once** at the end:
