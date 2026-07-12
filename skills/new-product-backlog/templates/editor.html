@@ -748,12 +748,12 @@ function buildChips() {
 
   state.statusValues.forEach(function (s) {
     sc.append(makeChip(s, "status-" + s, function () {
-      toggleIn(state.statuses, s); refresh();
+      toggleIn(state.statuses, s); persistView(); refresh();
     }, "status", s));
   });
   state.priorityValues.forEach(function (p) {
     pc.append(makeChip(p, "priority-" + p, function () {
-      toggleIn(state.priorities, p); refresh();
+      toggleIn(state.priorities, p); persistView(); refresh();
     }, "priority", p));
   });
 }
@@ -815,6 +815,7 @@ function onSort(key) {
   } else {
     state.sortKey = key; state.sortDir = "asc";
   }
+  persistView();
   buildHead();
   refresh();
 }
@@ -1074,7 +1075,57 @@ function clearFilters() {
   state.statuses = [];
   state.priorities = [];
   document.getElementById("search").value = "";
+  persistView();
   refresh();
+}
+
+/* ---------- View persistence (search / filters / sort across refresh) ----------
+   Keyed by the backlog file path (fetched from /api/meta) so separate projects
+   never share toolbar state. Only search/status/priority/sort are persisted —
+   never row expansion. Every read/write is guarded so private-mode, quota, or a
+   missing key degrades to a working editor with no persistence. */
+let VIEW_KEY = null;
+
+// The column keys that can actually be sorted (COLUMNS entries with a sort id).
+function sortableKeys() {
+  return COLUMNS.filter(function (c) { return c.sort; }).map(function (c) { return c.sort; });
+}
+
+function persistView() {
+  if (!VIEW_KEY) return;
+  try {
+    localStorage.setItem(VIEW_KEY, JSON.stringify({
+      search: state.search,
+      statuses: state.statuses,
+      priorities: state.priorities,
+      sortKey: state.sortKey,
+      sortDir: state.sortDir,
+    }));
+  } catch (_) { /* private mode / quota — persistence simply no-ops */ }
+}
+
+/* Read + validate the persisted view into `state`. Drops anything invalid so a
+   stale or corrupt entry can never break rendering. Must run after the schema
+   has loaded so state.statusValues / state.priorityValues are authoritative. */
+function restoreView() {
+  if (!VIEW_KEY) return;
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(VIEW_KEY) || "null"); } catch (_) { saved = null; }
+  if (!saved || typeof saved !== "object") return;
+
+  if (typeof saved.search === "string") state.search = saved.search;
+  if (Array.isArray(saved.statuses)) {
+    state.statuses = saved.statuses.filter(function (s) {
+      return state.statusValues.indexOf(s) !== -1;
+    });
+  }
+  if (Array.isArray(saved.priorities)) {
+    state.priorities = saved.priorities.filter(function (p) {
+      return state.priorityValues.indexOf(p) !== -1;
+    });
+  }
+  if (sortableKeys().indexOf(saved.sortKey) !== -1) state.sortKey = saved.sortKey;
+  if (saved.sortDir === "asc" || saved.sortDir === "desc") state.sortDir = saved.sortDir;
 }
 
 /* ---------- Floating row-action menu ---------- */
@@ -1329,7 +1380,7 @@ async function boot() {
   document.getElementById("new-btn").addEventListener("click", function () { openModal(null); });
   const searchInput = document.getElementById("search");
   searchInput.addEventListener("input", function (e) {
-    state.search = e.target.value; renderBody();
+    state.search = e.target.value; persistView(); renderBody();
   });
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape") { if (menuOpen) closeRowMenu(); else if (modalState) closeModal(); }
@@ -1352,6 +1403,19 @@ async function boot() {
       h("div", { class: "sub" }, e.message)));
     return;
   }
+
+  // Key persistence by the backlog file path. A meta failure must not block the
+  // editor — it just leaves VIEW_KEY null so persistence is disabled this session.
+  try {
+    const meta = await api("GET", "/api/meta");
+    if (meta && meta.path) VIEW_KEY = "npb:view:" + meta.path;
+  } catch (_) { VIEW_KEY = null; }
+
+  // Restore + validate persisted toolbar state, then reflect it into the UI.
+  // Chips (via syncChipStates in refresh) and the sort header (via buildHead)
+  // already read from `state`; only the search input needs an explicit sync.
+  restoreView();
+  searchInput.value = state.search;
 
   buildChips();
   buildHead();
