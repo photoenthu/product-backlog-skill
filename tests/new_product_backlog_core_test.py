@@ -442,6 +442,45 @@ class JsonOutputTest(unittest.TestCase):
             self.assertEqual(r.stdout.strip(), "BL-001")
 
 
+class FindCliTest(unittest.TestCase):
+    def _setup(self, t):
+        p = str(t.path)
+        _run("init", p)
+        _run("add", p, "--name", "Alpha login", "--status", "pending", "--priority", "high")
+        _run("add", p, "--name", "Beta signup", "--status", "new", "--priority", "low")
+        return p
+
+    def test_find_by_status(self):
+        with TempBacklog() as t:
+            p = self._setup(t)
+            r = _run("find", p, "--status", "pending")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            matches = json.loads(r.stdout)
+            self.assertEqual([i["id"] for i in matches], ["BL-001"])
+            self.assertEqual(matches[0]["name"], "Alpha login")
+
+    def test_find_by_name_contains(self):
+        with TempBacklog() as t:
+            p = self._setup(t)
+            r = _run("find", p, "--name-contains", "Beta")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            matches = json.loads(r.stdout)
+            self.assertEqual([i["id"] for i in matches], ["BL-002"])
+
+    def test_find_no_matches_prints_empty_list(self):
+        with TempBacklog() as t:
+            p = self._setup(t)
+            r = _run("find", p, "--name-contains", "zzz")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(json.loads(r.stdout), [])
+
+    def test_find_missing_file_errors(self):
+        with TempBacklog() as t:
+            r = _run("find", str(t.path), "--status", "pending")
+            self.assertNotEqual(r.returncode, 0)
+            self.assertFalse(t.path.exists())
+
+
 class DefaultPathTest(unittest.TestCase):
     def test_default_path_with_root(self):
         with tempfile.TemporaryDirectory() as d:

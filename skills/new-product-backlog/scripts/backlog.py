@@ -14,6 +14,8 @@ Subcommands:
   rm <path> <id> [--force --json]
   get <path> <id>
   list <path> [--status S --priority P]
+  find <path> [--name-contains STR --status S --priority P
+       --artifact-url STR --depends-on BL-NNN]  (always JSON output)
   validate <path>
   next-id <path>
   now
@@ -99,6 +101,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("get"); sp.add_argument("path"); sp.add_argument("id")
     sp = sub.add_parser("list"); sp.add_argument("path")
     sp.add_argument("--status", choices=core.STATUSES); sp.add_argument("--priority", choices=core.PRIORITIES)
+    sp = sub.add_parser("find"); sp.add_argument("path")
+    sp.add_argument("--name-contains", help="case-insensitive substring of name")
+    sp.add_argument("--status", choices=core.STATUSES)
+    sp.add_argument("--priority", choices=core.PRIORITIES)
+    sp.add_argument("--artifact-url", help="case-insensitive substring of any artifact url")
+    sp.add_argument("--depends-on", help="BL-NNN id the item depends on")
     sp = sub.add_parser("validate"); sp.add_argument("path")
     sp = sub.add_parser("next-id"); sp.add_argument("path")
     sub.add_parser("now")
@@ -184,6 +192,15 @@ def main(argv: list[str]) -> int:
         if cmd == "list":
             items = core.list_items(core.load(path), status=args.status, priority=args.priority)
             print(json.dumps(items, indent=2)); return 0
+
+        if cmd == "find":
+            matches = core.find_items(
+                core.load(path),
+                name_contains=args.name_contains, status=args.status,
+                priority=args.priority, artifact_url=args.artifact_url,
+                depends_on=args.depends_on,
+            )
+            print(json.dumps(matches, indent=2)); return 0
 
         if cmd == "validate":
             problems = core.validate(core.load(path))
