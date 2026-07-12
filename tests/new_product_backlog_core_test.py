@@ -374,5 +374,89 @@ class CliTest(unittest.TestCase):
         self.assertRegex(_run("now").stdout.strip(), r"^\d{4}-\d{2}-\d{2}T")
 
 
+class AddAutoInitTest(unittest.TestCase):
+    def test_add_creates_missing_file(self):
+        with TempBacklog() as t:
+            p = str(t.path)
+            self.assertFalse(t.path.exists())
+            r = _run("add", p, "--name", "First")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertTrue(t.path.exists())
+            data = json.loads(t.path.read_text())
+            self.assertEqual(len(data["items"]), 1)
+            self.assertEqual(data["items"][0]["id"], "BL-001")
+
+    def test_add_creates_missing_parent_dir(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = str(Path(d) / "docs" / "backlog" / "product-backlog.json")
+            r = _run("add", p, "--name", "First")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertTrue(Path(p).exists())
+
+
+class JsonOutputTest(unittest.TestCase):
+    def test_add_json_outputs_item(self):
+        with TempBacklog() as t:
+            p = str(t.path)
+            _run("init", p)
+            r = _run("add", p, "--name", "First", "--json")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            item = json.loads(r.stdout)
+            self.assertEqual(item["id"], "BL-001")
+            self.assertEqual(item["name"], "First")
+
+    def test_edit_json_outputs_item(self):
+        with TempBacklog() as t:
+            p = str(t.path)
+            _run("init", p)
+            _run("add", p, "--name", "First")
+            r = _run("edit", p, "BL-001", "--status", "shipped", "--json")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            item = json.loads(r.stdout)
+            self.assertEqual(item["status"], "shipped")
+
+    def test_discard_json_outputs_item(self):
+        with TempBacklog() as t:
+            p = str(t.path)
+            _run("init", p)
+            _run("add", p, "--name", "First")
+            r = _run("discard", p, "BL-001", "--json")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            item = json.loads(r.stdout)
+            self.assertEqual(item["status"], "discarded")
+
+    def test_rm_json_outputs_removed(self):
+        with TempBacklog() as t:
+            p = str(t.path)
+            _run("init", p)
+            _run("add", p, "--name", "First")
+            r = _run("rm", p, "BL-001", "--json")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(json.loads(r.stdout), {"removed": "BL-001"})
+
+    def test_add_without_json_keeps_human_output(self):
+        with TempBacklog() as t:
+            p = str(t.path)
+            _run("init", p)
+            r = _run("add", p, "--name", "First")
+            self.assertEqual(r.stdout.strip(), "BL-001")
+
+
+class DefaultPathTest(unittest.TestCase):
+    def test_default_path_with_root(self):
+        with tempfile.TemporaryDirectory() as d:
+            r = _run("default-path", "--root", d)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            expected = str(Path(d) / "docs" / "backlog" / "product-backlog.json")
+            self.assertEqual(r.stdout.strip(), expected)
+
+
+class VersionTest(unittest.TestCase):
+    def test_version_flag(self):
+        r = _run("--version")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("1.0", r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

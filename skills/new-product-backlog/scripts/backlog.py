@@ -7,26 +7,50 @@ Subcommands:
   init <path>
   add <path> --name N [--description D --status S --priority P
        --depends BL-001,BL-002 --dnbb YYYY-MM-DD --notes T
-       --artifact label=url (repeatable)]
-  edit <path> <id> [same flags as add, plus --clear-dnbb]
-  discard <path> <id> [--notes T]
-  rm <path> <id> [--force]
+       --artifact label=url (repeatable) --json]
+       (creates the file, and any missing parent dirs, if it doesn't exist)
+  edit <path> <id> [same flags as add, plus --clear-dnbb; supports --json]
+  discard <path> <id> [--notes T --json]
+  rm <path> <id> [--force --json]
   get <path> <id>
   list <path> [--status S --priority P]
   validate <path>
   next-id <path>
   now
   serve <path> [--port N]
+  default-path [--root DIR]
+  --version
 """
 from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import core  # noqa: E402
+
+__version__ = "1.0"
+
+
+def default_backlog_path(root: str | Path | None = None) -> Path:
+    """Resolve the conventional backlog file location: `root` if given, else
+    the current git repo's toplevel (`git rev-parse --show-toplevel`), else
+    the current working directory; joined with docs/backlog/product-backlog.json."""
+    if root is not None:
+        base = Path(root)
+    else:
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                capture_output=True, text=True, check=True,
+            )
+            base = Path(result.stdout.strip())
+        except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+            base = Path.cwd()
+    return (base / "docs" / "backlog" / "product-backlog.json").absolute()
 
 
 def _parse_depends(value: str | None) -> list[str] | None:
@@ -56,18 +80,22 @@ def _add_common_flags(sp, require_name):
     sp.add_argument("--dnbb", help="doNotBuildBefore date YYYY-MM-DD")
     sp.add_argument("--notes")
     sp.add_argument("--artifact", action="append", help="label=url (repeatable)")
+    sp.add_argument("--json", action="store_true", help="print the item as JSON")
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="backlog.py")
+    p.add_argument("--version", action="version", version=f"new-product-backlog {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sp = sub.add_parser("init"); sp.add_argument("path")
     sp = sub.add_parser("add"); sp.add_argument("path"); _add_common_flags(sp, True)
     sp = sub.add_parser("edit"); sp.add_argument("path"); sp.add_argument("id")
     _add_common_flags(sp, False); sp.add_argument("--clear-dnbb", action="store_true")
-    sp = sub.add_parser("discard"); sp.add_argument("path"); sp.add_argument("id"); sp.add_argument("--notes")
+    sp = sub.add_parser("discard"); sp.add_argument("path"); sp.add_argument("id")
+    sp.add_argument("--notes"); sp.add_argument("--json", action="store_true", help="print the item as JSON")
     sp = sub.add_parser("rm"); sp.add_argument("path"); sp.add_argument("id"); sp.add_argument("--force", action="store_true")
+    sp.add_argument("--json", action="store_true", help="print {\"removed\": id} as JSON")
     sp = sub.add_parser("get"); sp.add_argument("path"); sp.add_argument("id")
     sp = sub.add_parser("list"); sp.add_argument("path")
     sp.add_argument("--status", choices=core.STATUSES); sp.add_argument("--priority", choices=core.PRIORITIES)
@@ -75,6 +103,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("next-id"); sp.add_argument("path")
     sub.add_parser("now")
     sp = sub.add_parser("serve"); sp.add_argument("path"); sp.add_argument("--port", type=int, default=8765)
+    sp = sub.add_parser("default-path"); sp.add_argument("--root")
     return p
 
 
@@ -95,12 +124,16 @@ def main(argv: list[str]) -> int:
             server.run_server(Path(args.path), args.port)
             return 0
 
+        if cmd == "default-path":
+            print(default_backlog_path(args.root)); return 0
+
         path = Path(args.path)
 
         if cmd == "next-id":
             print(core.next_id(core.load(path))); return 0
 
         if cmd == "add":
+            core.init(path)
             data = core.load(path)
             item = core.add_item(
                 data, name=args.name, description=args.description or "",
@@ -111,7 +144,7 @@ def main(argv: list[str]) -> int:
                 artifacts=_parse_artifacts(args.artifact),
             )
             core.save(path, data)
-            print(item["id"]); return 0
+            print(json.dumps(item, indent=2) if args.json else item["id"]); return 0
 
         if cmd == "edit":
             data = core.load(path)
@@ -125,21 +158,25 @@ def main(argv: list[str]) -> int:
             if args.artifact is not None: changes["artifacts"] = _parse_artifacts(args.artifact)
             if args.clear_dnbb: changes["do_not_build_before"] = None
             elif args.dnbb is not None: changes["do_not_build_before"] = args.dnbb
-            core.edit_item(data, args.id, **changes)
+            item = core.edit_item(data, args.id, **changes)
             core.save(path, data)
-            print(f"edited {args.id}"); return 0
+            print(json.dumps(item, indent=2) if args.json else f"edited {args.id}"); return 0
 
         if cmd == "discard":
             data = core.load(path)
-            core.discard_item(data, args.id, notes=args.notes)
+            item = core.discard_item(data, args.id, notes=args.notes)
             core.save(path, data)
-            print(f"discarded {args.id}"); return 0
+            print(json.dumps(item, indent=2) if args.json else f"discarded {args.id}"); return 0
 
         if cmd == "rm":
             data = core.load(path)
             core.remove_item(data, args.id, force=args.force)
             core.save(path, data)
-            print(f"removed {args.id}"); return 0
+            if args.json:
+                print(json.dumps({"removed": args.id}))
+            else:
+                print(f"removed {args.id}")
+            return 0
 
         if cmd == "get":
             print(json.dumps(core.get_item(core.load(path), args.id), indent=2)); return 0
