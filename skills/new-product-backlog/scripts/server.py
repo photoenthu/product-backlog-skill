@@ -7,7 +7,10 @@ Routes:
   GET    /                      -> editor.html
   GET    /api/backlog           -> full backlog JSON
   GET    /api/schema            -> JSON schema
-  GET    /api/meta              -> {"path": "<absolute backlog path>"}
+  GET    /api/meta              -> {"path": "<abs backlog path>", "root": "<project root>"}
+  GET    /file?path=<rel>       -> a project file (relative artifact link),
+                                   confined to the project root; active content
+                                   types (html/svg/xml) served as inert text
   POST   /api/items             -> add item        (body: item fields)
   PATCH  /api/items/<id>        -> edit item        (body: changed fields)
   DELETE /api/items/<id>?mode=discard|hard -> discard (default) or hard-delete
@@ -23,6 +26,8 @@ from __future__ import annotations
 
 import errno
 import json
+import mimetypes
+import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -42,10 +47,38 @@ FIELD_MAP = {
     "artifacts": "artifacts",
 }
 
+# Content types that could execute script in the editor's own origin (and thus
+# reach the mutating /api routes) are served as inert text/plain instead.
+_ACTIVE_TYPES = {"text/html", "application/xhtml+xml", "image/svg+xml", "application/xml"}
 
-def make_handler(path: Path):
+
+def project_root(backlog_path: Path) -> Path:
+    """Resolve the base directory that relative artifact paths are served from.
+
+    Prefers the git toplevel of the backlog's directory; failing that, if the
+    backlog sits at the conventional `<root>/docs/backlog/<file>`, returns that
+    `<root>`; otherwise the backlog file's own directory."""
+    p = Path(backlog_path).resolve()
+    d = p.parent
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(d), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, check=True,
+        )
+        top = out.stdout.strip()
+        if top:
+            return Path(top).resolve()
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        pass
+    if d.name == "backlog" and d.parent.name == "docs":
+        return d.parent.parent
+    return d
+
+
+def make_handler(path: Path, root: Path | None = None):
     lock = threading.Lock()
     path = Path(path)
+    base_root = Path(root).resolve() if root is not None else project_root(path)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -102,11 +135,42 @@ def make_handler(path: Path):
                     self._send_json(400, {"error": str(e)})
             elif route == "/api/meta":
                 try:
-                    self._send_json(200, {"path": str(path.absolute())})
+                    self._send_json(200, {"path": str(path.absolute()), "root": str(base_root)})
                 except (core.BacklogError, OSError) as e:
                     self._send_json(400, {"error": str(e)})
+            elif route == "/file":
+                rel = parse_qs(urlparse(self.path).query).get("path", [""])[0]
+                self._serve_artifact(rel)
             else:
                 self._send_json(404, {"error": "not found"})
+
+        def _serve_artifact(self, rel: str):
+            """Serve a project file for a relative artifact path, confined to
+            base_root. Rejects anything that escapes the root; serves
+            potentially-active content types as inert text/plain."""
+            if not rel:
+                return self._send_json(404, {"error": "no path given"})
+            try:
+                target = (base_root / rel).resolve()
+            except OSError as e:
+                return self._send_json(400, {"error": str(e)})
+            if target != base_root and base_root not in target.parents:
+                return self._send_json(403, {"error": "path escapes project root"})
+            if not target.is_file():
+                return self._send_json(404, {"error": f"not found: {rel}"})
+            ctype, _ = mimetypes.guess_type(str(target))
+            if ctype is None or ctype.startswith("text/") or ctype in _ACTIVE_TYPES:
+                ctype = "text/plain; charset=utf-8"
+            try:
+                body = target.read_bytes()
+            except OSError as e:
+                return self._send_json(500, {"error": str(e)})
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
         # ---- POST ----
         def do_POST(self):

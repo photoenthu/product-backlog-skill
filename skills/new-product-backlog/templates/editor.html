@@ -1044,11 +1044,18 @@ function renderArtifact(a) {
   const href = safeArtifactUrl(rawUrl);
 
   if (href) {
+    // External http(s) links open directly; relative in-repo paths are routed
+    // through the server's /file endpoint (which serves them from the project
+    // root) since the editor's origin doesn't otherwise serve project files.
+    const external = /^https?:/i.test(href);
+    const finalHref = external
+      ? href
+      : "/file?path=" + encodeURIComponent(href.replace(/^\/+/, ""));
     const link = h("a", { class: "art-link", target: "_blank", rel: "noopener noreferrer" },
       h("span", { class: "art-ic", "aria-hidden": "true" }, "↗"),
       h("span", { class: "art-label" }, label),
       rawUrl.trim() ? h("span", { class: "art-url" }, rawUrl) : null);
-    link.setAttribute("href", href);   // sanitized value only
+    link.setAttribute("href", finalHref);   // sanitized value only
     return link;
   }
   return h("span", { class: "art-text", title: "Link withheld: unsupported URL scheme" },

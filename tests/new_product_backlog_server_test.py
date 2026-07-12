@@ -91,6 +91,78 @@ class ServerTest(unittest.TestCase):
             self.assertIn(b"<html", resp.read()[:2000].lower())
 
 
+def _raw_get(url):
+    """GET returning (status, body_bytes) without assuming JSON."""
+    try:
+        with urllib.request.urlopen(url) as resp:
+            return resp.status, resp.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+class FileServeTest(unittest.TestCase):
+    """Relative artifact links are served from the project root via /file."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.dir.name)
+        # Conventional layout: <root>/docs/backlog/product-backlog.json
+        backlog = self.root / "docs" / "backlog" / "product-backlog.json"
+        core.init(backlog)
+        # A plan artifact and a secret outside the plans dir.
+        (self.root / "docs" / "plans").mkdir(parents=True)
+        (self.root / "docs" / "plans" / "note.md").write_text("# Plan\nbody\n")
+        (self.root / "docs" / "page.html").write_text("<script>alert(1)</script>")
+        # A secret in a SIBLING dir (outside the project root) to prove escapes fail.
+        self.outside = tempfile.TemporaryDirectory()
+        self.outside_name = Path(self.outside.name).name
+        (Path(self.outside.name) / "leak.txt").write_text("top secret")
+        # Pass root explicitly so the test doesn't depend on git discovery.
+        handler = server.make_handler(backlog, root=self.root)
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.port = self.httpd.server_address[1]
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.thread.start()
+        self.base = f"http://127.0.0.1:{self.port}"
+
+    def tearDown(self):
+        self.httpd.shutdown()
+        self.dir.cleanup()
+        self.outside.cleanup()
+
+    def test_serves_relative_file(self):
+        status, body = _raw_get(f"{self.base}/file?path=docs/plans/note.md")
+        self.assertEqual(status, 200)
+        self.assertIn(b"# Plan", body)
+
+    def test_missing_file_is_404(self):
+        status, _ = _raw_get(f"{self.base}/file?path=docs/plans/nope.md")
+        self.assertEqual(status, 404)
+
+    def test_traversal_to_sibling_is_blocked(self):
+        # ../<sibling>/leak.txt resolves OUTSIDE the project root; must be refused.
+        status, body = _raw_get(f"{self.base}/file?path=../{self.outside_name}/leak.txt")
+        self.assertNotEqual(status, 200, "served a file outside the project root")
+        self.assertIn(status, (403, 404))
+        self.assertNotIn(b"top secret", body)
+
+    def test_absolute_path_rejected(self):
+        status, _ = _raw_get(f"{self.base}/file?path=/etc/passwd")
+        self.assertIn(status, (403, 404))
+
+    def test_html_served_as_inert_text(self):
+        # An .html artifact must not be served as text/html (it could script the
+        # editor's origin); it's downgraded to text/plain.
+        try:
+            with urllib.request.urlopen(f"{self.base}/file?path=docs/page.html") as resp:
+                ctype = resp.headers.get("Content-Type", "")
+                nosniff = resp.headers.get("X-Content-Type-Options", "")
+        except urllib.error.HTTPError as e:
+            self.fail(f"unexpected {e.code}")
+        self.assertIn("text/plain", ctype)
+        self.assertEqual(nosniff, "nosniff")
+
+
 class BindServerTest(unittest.TestCase):
     """The editor must not crash when its preferred port is busy; bind_server
     scans upward to the first free port."""
