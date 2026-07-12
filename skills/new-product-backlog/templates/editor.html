@@ -196,7 +196,7 @@ body::before {
 
 .btn:focus-visible, .chip:focus-visible, input:focus-visible,
 textarea:focus-visible, select:focus-visible, .th-sort:focus-visible,
-.expand-btn:focus-visible, .art-link:focus-visible {
+.expand-btn:focus-visible, .art-link:focus-visible, .exec-btn:focus-visible {
   outline: 2px solid var(--focus); outline-offset: 2px;
 }
 
@@ -388,6 +388,22 @@ tr.detail-row > td.detail-cell { padding: 0; }
 .detail-desc { font-size: 13.5px; color: var(--text); }
 .detail-notes { font-size: 12.5px; color: var(--muted); }
 .detail-empty { font-size: 13px; color: var(--faint); font-style: italic; }
+
+/* Copy-to-clipboard execution prompts, directly under the description. */
+.exec-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.exec-btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  font: inherit; font-size: 12px; font-weight: 600; line-height: 1;
+  padding: 6px 11px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface); color: var(--accent);
+  transition: border-color .12s ease, background .12s ease, color .12s ease;
+}
+.exec-btn:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+.exec-btn .exec-ic { font-size: 11px; color: var(--faint); }
+.exec-btn.is-copied { color: var(--st-shipped); border-color: currentColor; }
+.exec-btn.is-copied .exec-ic { color: currentColor; }
+.exec-btn.is-failed { color: var(--block); border-color: currentColor; }
+@media (prefers-reduced-motion: reduce) { .exec-btn { transition: none; } }
 .art-list { display: flex; flex-direction: column; gap: 7px; align-items: flex-start; }
 .art-link, .art-text {
   display: inline-flex; align-items: baseline; gap: 9px; max-width: 100%;
@@ -1005,13 +1021,87 @@ function buildDetailRow(it, byId, detailId) {
   rail.style.setProperty("--c", "var(--pr-" + it.priority + ")");
   tr.append(rail);
 
+  // The Auto / Semi copy-prompt buttons live directly below the description.
+  const descBlock = detailBlock("Description", it.description, "No description.", "detail-desc");
+  descBlock.append(detailActions(it));
+
   const grid = h("div", { class: "detail" },
-    detailBlock("Description", it.description, "No description.", "detail-desc"),
+    descBlock,
     detailArtifacts(it.artifacts),
     detailBlock("Notes", it.notes, "No notes.", "detail-notes", "notes"));
 
   tr.append(h("td", { class: "detail-cell", colspan: DETAIL_COLSPAN, id: detailId }, grid));
   return tr;
+}
+
+// <backlogPrompt>
+function backlogPrompt(id, mode) {
+  const skill = mode === "auto" ? "pr-from-backlog" : "semiauto-backlog-execution";
+  return "Implement " + id + " using " + skill + ".";
+}
+// </backlogPrompt>
+
+function legacyCopy(text) {
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-1000px";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch (_) {
+    return false;
+  }
+}
+
+function copyToClipboard(text) {
+  // localhost is a secure context, so the async API is normally available;
+  // fall back to a hidden textarea if it's missing or refuses.
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text).then(
+      function () { return true; },
+      function () { return legacyCopy(text); });
+  }
+  return Promise.resolve(legacyCopy(text));
+}
+
+// Two one-click prompts per item, sitting directly under the description.
+const EXEC_MODES = [
+  { label: "Auto", mode: "auto" },
+  { label: "Semi", mode: "semi" },
+];
+
+function detailActions(it) {
+  const wrap = h("div", { class: "exec-actions" });
+  EXEC_MODES.forEach(function (m) {
+    const text = backlogPrompt(it.id, m.mode);
+    const btn = h("button", {
+      type: "button",
+      class: "exec-btn",
+      title: "Copy to clipboard: " + text,
+      "aria-label": "Copy the " + m.label + " prompt for " + it.id,
+      onclick: function () {
+        copyToClipboard(text).then(function (ok) {
+          const lab = btn.querySelector(".exec-label");
+          if (!lab) return;
+          lab.textContent = ok ? "Copied" : "Copy failed";
+          btn.classList.add(ok ? "is-copied" : "is-failed");
+          setTimeout(function () {
+            lab.textContent = m.label;
+            btn.classList.remove("is-copied", "is-failed");
+          }, 1400);
+        });
+      },
+    },
+      h("span", { class: "exec-ic", "aria-hidden": "true" }, "⧉"),
+      h("span", { class: "exec-label" }, m.label));
+    wrap.append(btn);
+  });
+  return wrap;
 }
 
 function detailBlock(label, value, emptyText, bodyClass, extraClass) {

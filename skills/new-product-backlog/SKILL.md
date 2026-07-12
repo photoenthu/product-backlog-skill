@@ -223,6 +223,15 @@ The editor is a self-contained page (inline CSS/JS, no CDN, theme-aware) that li
 
 **Markdown artifacts render as formatted, read-only HTML.** A `.md`/`.markdown` artifact opens as a styled, readable page (headings, bold/italic, inline + fenced code, lists, blockquotes, tables, links) instead of raw text. The original file is never modified — it's read and rendered on the fly. Rendering is done by the bundled `scripts/mdview.py` (pure stdlib, no dependencies): it **escapes all raw HTML** in the markdown (an embedded `<script>` shows as visible text, never executes) and **sanitizes link hrefs** (only `http(s)`, in-page anchors, and in-repo relative paths — which are routed back through `/file`, so cross-doc references open in the viewer too). Everything else (HTML/SVG/XML artifacts) is still served as inert `text/plain`, so no artifact can script the editor's origin.
 
+**Execution prompts.** Every expanded item shows two one-click buttons directly under its description, which copy a ready-to-paste prompt to the clipboard:
+
+| Button | Copies |
+|---|---|
+| **Auto** | `Implement BL-NNN using pr-from-backlog.` |
+| **Semi** | `Implement BL-NNN using semiauto-backlog-execution.` |
+
+`BL-NNN` is the item's own id. Paste the copied line into Claude to kick off that item's implementation.
+
 Filter/sort/search state also persists across page refreshes (per-backlog, in `localStorage`).
 
 Critically, the browser **never writes to disk**: every mutation POSTs/PATCHes/DELETEs to the local server, which routes through the same validating `core` functions the CLI uses and returns the authoritative backlog for the page to re-render. So the editor is a **safe manual path** — it can't produce an invalid file any more than the CLI can. The server binds **127.0.0.1 only** (no auth, single local user, not reachable from the network).
