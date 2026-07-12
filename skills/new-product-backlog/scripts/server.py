@@ -7,6 +7,7 @@ Routes:
   GET    /                      -> editor.html
   GET    /api/backlog           -> full backlog JSON
   GET    /api/schema            -> JSON schema
+  GET    /api/meta              -> {"path": "<absolute backlog path>"}
   POST   /api/items             -> add item        (body: item fields)
   PATCH  /api/items/<id>        -> edit item        (body: changed fields)
   DELETE /api/items/<id>?mode=discard|hard -> discard (default) or hard-delete
@@ -92,6 +93,11 @@ def make_handler(path: Path):
             elif route == "/api/schema":
                 try:
                     self._send_file(200, SCHEMA_PATH.read_bytes(), "application/json")
+                except (core.BacklogError, OSError) as e:
+                    self._send_json(400, {"error": str(e)})
+            elif route == "/api/meta":
+                try:
+                    self._send_json(200, {"path": str(path.absolute())})
                 except (core.BacklogError, OSError) as e:
                     self._send_json(400, {"error": str(e)})
             else:

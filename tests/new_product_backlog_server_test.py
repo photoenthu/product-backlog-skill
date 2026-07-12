@@ -76,6 +76,13 @@ class ServerTest(unittest.TestCase):
         # File unchanged:
         self.assertEqual(json.loads(self.path.read_text())["items"], [])
 
+    def test_get_meta_returns_backlog_path(self):
+        status, body = _req("GET", f"{self.base}/api/meta")
+        self.assertEqual(status, 200, body)
+        self.assertIn("path", body)
+        self.assertTrue(body["path"])
+        self.assertTrue(body["path"].endswith("product-backlog.json"), body["path"])
+
     def test_serves_editor_html_at_root(self):
         # Root returns HTML, not JSON, so fetch raw instead of using _req.
         with urllib.request.urlopen(f"{self.base}/") as resp:
