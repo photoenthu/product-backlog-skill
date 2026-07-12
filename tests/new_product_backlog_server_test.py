@@ -113,6 +113,9 @@ class FileServeTest(unittest.TestCase):
         (self.root / "docs" / "plans").mkdir(parents=True)
         (self.root / "docs" / "plans" / "note.md").write_text("# Plan\nbody\n")
         (self.root / "docs" / "page.html").write_text("<script>alert(1)</script>")
+        # A file sitting next to the backlog itself (docs/backlog/), to exercise
+        # backlog-dir-relative artifact paths.
+        (self.root / "docs" / "backlog" / "nearby.md").write_text("# Nearby\n")
         # A secret in a SIBLING dir (outside the project root) to prove escapes fail.
         self.outside = tempfile.TemporaryDirectory()
         self.outside_name = Path(self.outside.name).name
@@ -146,7 +149,34 @@ class FileServeTest(unittest.TestCase):
         self.assertIn(status, (403, 404))
         self.assertNotIn(b"top secret", body)
 
-    def test_absolute_path_rejected(self):
+    def test_serves_leading_slash_repo_relative(self):
+        # "/docs/plans/note.md" (leading slash) is treated as repo-root-relative.
+        status, body = _raw_get(f"{self.base}/file?path=/docs/plans/note.md")
+        self.assertEqual(status, 200)
+        self.assertIn(b"# Plan", body)
+
+    def test_serves_absolute_path_inside_root(self):
+        from urllib.parse import quote
+        abs_path = str(self.root / "docs" / "plans" / "note.md")
+        status, body = _raw_get(f"{self.base}/file?path={quote(abs_path)}")
+        self.assertEqual(status, 200)
+        self.assertIn(b"# Plan", body)
+
+    def test_serves_backlog_dir_relative(self):
+        # A file next to the backlog, referenced by its bare name, resolves via
+        # the backlog-dir interpretation.
+        status, body = _raw_get(f"{self.base}/file?path=nearby.md")
+        self.assertEqual(status, 200)
+        self.assertIn(b"# Nearby", body)
+
+    def test_serves_backlog_dir_relative_with_dotdot(self):
+        # "../plans/note.md" from docs/backlog/ resolves to docs/plans/note.md —
+        # the case that previously produced "path escapes project root".
+        status, body = _raw_get(f"{self.base}/file?path=../plans/note.md")
+        self.assertEqual(status, 200)
+        self.assertIn(b"# Plan", body)
+
+    def test_absolute_path_outside_root_rejected(self):
         status, _ = _raw_get(f"{self.base}/file?path=/etc/passwd")
         self.assertIn(status, (403, 404))
 

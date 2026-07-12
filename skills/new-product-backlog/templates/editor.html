@@ -1050,7 +1050,7 @@ function renderArtifact(a) {
     const external = /^https?:/i.test(href);
     const finalHref = external
       ? href
-      : "/file?path=" + encodeURIComponent(href.replace(/^\/+/, ""));
+      : "/file?path=" + encodeURIComponent(href);
     const link = h("a", { class: "art-link", target: "_blank", rel: "noopener noreferrer" },
       h("span", { class: "art-ic", "aria-hidden": "true" }, "↗"),
       h("span", { class: "art-label" }, label),

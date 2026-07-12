@@ -79,6 +79,7 @@ def make_handler(path: Path, root: Path | None = None):
     lock = threading.Lock()
     path = Path(path)
     base_root = Path(root).resolve() if root is not None else project_root(path)
+    base_dir = path.resolve().parent  # the backlog file's own directory
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -144,20 +145,58 @@ def make_handler(path: Path, root: Path | None = None):
             else:
                 self._send_json(404, {"error": "not found"})
 
+        def _within_root(self, candidate: Path) -> Path | None:
+            """Resolve `candidate` and return it only if it stays inside the
+            project root; otherwise None."""
+            try:
+                resolved = candidate.resolve()
+            except OSError:
+                return None
+            if resolved == base_root or base_root in resolved.parents:
+                return resolved
+            return None
+
+        def _artifact_candidates(self, rel: str):
+            """The interpretations a relative artifact path may have, in order:
+            repo-root-relative, backlog-dir-relative, and (if absolute) the
+            literal path. Leading slashes are treated as repo-root-relative too,
+            so `/docs/x` and `docs/x` both work."""
+            stripped = rel.lstrip("/")
+            candidates = [base_root / stripped, base_dir / stripped]
+            p = Path(rel)
+            if p.is_absolute():
+                candidates.insert(0, p)
+            return candidates
+
         def _serve_artifact(self, rel: str):
-            """Serve a project file for a relative artifact path, confined to
-            base_root. Rejects anything that escapes the root; serves
+            """Serve a project file for an artifact path. Tries the sensible
+            interpretations and serves whichever lands INSIDE the project root;
+            anything that only resolves outside the root is refused. Serves
             potentially-active content types as inert text/plain."""
             if not rel:
                 return self._send_json(404, {"error": "no path given"})
-            try:
-                target = (base_root / rel).resolve()
-            except OSError as e:
-                return self._send_json(400, {"error": str(e)})
-            if target != base_root and base_root not in target.parents:
-                return self._send_json(403, {"error": "path escapes project root"})
-            if not target.is_file():
-                return self._send_json(404, {"error": f"not found: {rel}"})
+
+            candidates = self._artifact_candidates(rel)
+            target = None
+            for cand in candidates:
+                resolved = self._within_root(cand)
+                if resolved is not None and resolved.is_file():
+                    target = resolved
+                    break
+
+            if target is None:
+                # Distinguish "outside the repo" from "just not there" so the
+                # message is actionable.
+                for cand in candidates:
+                    try:
+                        if cand.resolve().is_file():
+                            return self._send_json(403, {
+                                "error": f"artifact path resolves outside the project root: {rel}"
+                            })
+                    except OSError:
+                        pass
+                return self._send_json(404, {"error": f"artifact not found under project root: {rel}"})
+
             ctype, _ = mimetypes.guess_type(str(target))
             if ctype is None or ctype.startswith("text/") or ctype in _ACTIVE_TYPES:
                 ctype = "text/plain; charset=utf-8"
