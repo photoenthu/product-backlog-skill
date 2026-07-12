@@ -197,6 +197,35 @@ def make_handler(path: Path, root: Path | None = None):
                         pass
                 return self._send_json(404, {"error": f"artifact not found under project root: {rel}"})
 
+            # Markdown artifacts are rendered to a safe, self-contained HTML page
+            # (read-only; the original file is never modified) instead of served
+            # as raw text.
+            if target.suffix.lower() in (".md", ".markdown"):
+                import mdview
+                try:
+                    md_text = target.read_text(encoding="utf-8", errors="replace")
+                except OSError as e:
+                    return self._send_json(500, {"error": str(e)})
+                # link_base = the markdown file's directory relative to the
+                # project root (posix), so relative links inside it resolve
+                # through /file. "" if the file sits at the root.
+                try:
+                    rel_dir = target.parent.relative_to(base_root).as_posix()
+                except ValueError:
+                    rel_dir = ""
+                page = mdview.render_page(
+                    md_text, title=target.name,
+                    link_base="" if rel_dir == "." else rel_dir,
+                )
+                body = page.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
             ctype, _ = mimetypes.guess_type(str(target))
             if ctype is None or ctype.startswith("text/") or ctype in _ACTIVE_TYPES:
                 ctype = "text/plain; charset=utf-8"

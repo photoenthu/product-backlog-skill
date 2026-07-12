@@ -116,6 +116,16 @@ class FileServeTest(unittest.TestCase):
         # A file sitting next to the backlog itself (docs/backlog/), to exercise
         # backlog-dir-relative artifact paths.
         (self.root / "docs" / "backlog" / "nearby.md").write_text("# Nearby\n")
+        # A markdown artifact exercising the viewer: heading, bold, and an
+        # embedded <script> that must be escaped, not executed.
+        self.md_src = (
+            "# Title\n\n"
+            "Some **bold** text.\n\n"
+            "<script>alert(1)</script>\n"
+        )
+        (self.root / "docs" / "plans" / "rich.md").write_text(self.md_src)
+        # A plain-text artifact, to prove non-markdown serving is unchanged.
+        (self.root / "docs" / "plans" / "raw.txt").write_text("# Not markdown\n**literal**\n")
         # A secret in a SIBLING dir (outside the project root) to prove escapes fail.
         self.outside = tempfile.TemporaryDirectory()
         self.outside_name = Path(self.outside.name).name
@@ -134,9 +144,10 @@ class FileServeTest(unittest.TestCase):
         self.outside.cleanup()
 
     def test_serves_relative_file(self):
+        # .md artifacts are rendered to HTML, so the heading arrives as <h1>.
         status, body = _raw_get(f"{self.base}/file?path=docs/plans/note.md")
         self.assertEqual(status, 200)
-        self.assertIn(b"# Plan", body)
+        self.assertIn(b"<h1>Plan</h1>", body)
 
     def test_missing_file_is_404(self):
         status, _ = _raw_get(f"{self.base}/file?path=docs/plans/nope.md")
@@ -153,32 +164,68 @@ class FileServeTest(unittest.TestCase):
         # "/docs/plans/note.md" (leading slash) is treated as repo-root-relative.
         status, body = _raw_get(f"{self.base}/file?path=/docs/plans/note.md")
         self.assertEqual(status, 200)
-        self.assertIn(b"# Plan", body)
+        self.assertIn(b"<h1>Plan</h1>", body)
 
     def test_serves_absolute_path_inside_root(self):
         from urllib.parse import quote
         abs_path = str(self.root / "docs" / "plans" / "note.md")
         status, body = _raw_get(f"{self.base}/file?path={quote(abs_path)}")
         self.assertEqual(status, 200)
-        self.assertIn(b"# Plan", body)
+        self.assertIn(b"<h1>Plan</h1>", body)
 
     def test_serves_backlog_dir_relative(self):
         # A file next to the backlog, referenced by its bare name, resolves via
         # the backlog-dir interpretation.
         status, body = _raw_get(f"{self.base}/file?path=nearby.md")
         self.assertEqual(status, 200)
-        self.assertIn(b"# Nearby", body)
+        self.assertIn(b"<h1>Nearby</h1>", body)
 
     def test_serves_backlog_dir_relative_with_dotdot(self):
         # "../plans/note.md" from docs/backlog/ resolves to docs/plans/note.md —
         # the case that previously produced "path escapes project root".
         status, body = _raw_get(f"{self.base}/file?path=../plans/note.md")
         self.assertEqual(status, 200)
-        self.assertIn(b"# Plan", body)
+        self.assertIn(b"<h1>Plan</h1>", body)
 
     def test_absolute_path_outside_root_rejected(self):
         status, _ = _raw_get(f"{self.base}/file?path=/etc/passwd")
         self.assertIn(status, (403, 404))
+
+    def test_markdown_rendered_as_html(self):
+        # A .md artifact is rendered to a formatted HTML page, not raw text.
+        with urllib.request.urlopen(f"{self.base}/file?path=docs/plans/rich.md") as resp:
+            status = resp.status
+            ctype = resp.headers.get("Content-Type", "")
+            nosniff = resp.headers.get("X-Content-Type-Options", "")
+            body = resp.read()
+        self.assertEqual(status, 200)
+        self.assertIn("text/html", ctype)
+        self.assertEqual(nosniff, "nosniff")
+        self.assertIn(b"<!doctype html", body.lower())
+        self.assertIn(b"<h1>Title</h1>", body)
+        self.assertIn(b"<strong>bold</strong>", body)
+
+    def test_markdown_escapes_embedded_script(self):
+        # The <script> in the source must arrive escaped -- never as a live tag.
+        _, body = _raw_get(f"{self.base}/file?path=docs/plans/rich.md")
+        self.assertIn(b"&lt;script&gt;alert(1)&lt;/script&gt;", body)
+        self.assertNotIn(b"<script>alert(1)</script>", body)
+        self.assertNotIn(b"<script", body.lower())
+
+    def test_markdown_render_does_not_modify_source(self):
+        # The viewer is read-only: the .md file on disk is untouched.
+        _raw_get(f"{self.base}/file?path=docs/plans/rich.md")
+        self.assertEqual((self.root / "docs" / "plans" / "rich.md").read_text(), self.md_src)
+
+    def test_txt_still_served_as_plain_text(self):
+        # Non-markdown files keep their old behavior: inert text, not rendered.
+        with urllib.request.urlopen(f"{self.base}/file?path=docs/plans/raw.txt") as resp:
+            ctype = resp.headers.get("Content-Type", "")
+            body = resp.read()
+        self.assertIn("text/plain", ctype)
+        self.assertIn(b"# Not markdown", body)      # raw markdown syntax preserved
+        self.assertIn(b"**literal**", body)
+        self.assertNotIn(b"<h1>", body)             # not rendered
 
     def test_html_served_as_inert_text(self):
         # An .html artifact must not be served as text/html (it could script the
