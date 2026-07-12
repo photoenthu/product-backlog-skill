@@ -1,4 +1,5 @@
 import json
+import socket
 import sys
 import threading
 import time
@@ -88,6 +89,66 @@ class ServerTest(unittest.TestCase):
         with urllib.request.urlopen(f"{self.base}/") as resp:
             self.assertEqual(resp.status, 200)
             self.assertIn(b"<html", resp.read()[:2000].lower())
+
+
+class BindServerTest(unittest.TestCase):
+    """The editor must not crash when its preferred port is busy; bind_server
+    scans upward to the first free port."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.path = Path(self.dir.name) / "product-backlog.json"
+        core.init(self.path)
+        self.handler = server.make_handler(self.path)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    @staticmethod
+    def _free_port():
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.close()
+        return port
+
+    def test_binds_requested_port_when_free(self):
+        port = self._free_port()
+        httpd = server.bind_server(self.handler, port)
+        try:
+            self.assertEqual(httpd.server_address[1], port)
+        finally:
+            httpd.server_close()
+
+    def test_falls_forward_when_port_busy(self):
+        # Hold a port open (actively listening), then bind_server must pick a
+        # different, higher port rather than raising.
+        occupied = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        occupied.bind(("127.0.0.1", 0))
+        occupied.listen(1)
+        busy = occupied.getsockname()[1]
+        try:
+            httpd = server.bind_server(self.handler, busy, max_attempts=25)
+            try:
+                actual = httpd.server_address[1]
+                self.assertNotEqual(actual, busy)
+                self.assertTrue(busy < actual < busy + 25)
+            finally:
+                httpd.server_close()
+        finally:
+            occupied.close()
+
+    def test_raises_when_whole_range_busy(self):
+        # A one-wide range on a busy port has nowhere to fall forward to.
+        occupied = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        occupied.bind(("127.0.0.1", 0))
+        occupied.listen(1)
+        busy = occupied.getsockname()[1]
+        try:
+            with self.assertRaises(OSError):
+                server.bind_server(self.handler, busy, max_attempts=1)
+        finally:
+            occupied.close()
 
 
 if __name__ == "__main__":

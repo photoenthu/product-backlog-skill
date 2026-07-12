@@ -212,8 +212,10 @@ For manual editing — add/edit/filter/search outside a session-analysis run —
 
 ```bash
 python3 <skill-dir>/scripts/backlog.py serve docs/backlog/product-backlog.json
-# then open http://127.0.0.1:8765/  (Ctrl-C to stop; override with --port N)
+# then open http://127.0.0.1:8765/  (Ctrl-C to stop; override the starting port with --port N)
 ```
+
+If the port (8765 by default, or whatever `--port` requests) is already in use, `serve` automatically scans upward to the next free port and prints the actual URL it bound to — a busy port never crashes the editor.
 
 The editor is a self-contained page (inline CSS/JS, no CDN, theme-aware) that lists all items and supports add/edit, delete (discard by default, hard-delete as an explicit option), column sort, multi-select status/priority filter chips, and text search across id/name/description/notes. It also surfaces warnings when a dependency isn't yet `shipped` or when `doNotBuildBefore` is in the future.
 

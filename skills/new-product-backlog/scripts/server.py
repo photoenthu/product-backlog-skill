@@ -14,9 +14,14 @@ Routes:
 
 All mutating routes return the full, updated backlog (200) or {"error": msg}
 (400) on a BacklogError.
+
+`run_server` auto-selects a free port: it starts at the requested port and
+scans upward to the first one that's available, so a busy port never crashes
+the editor.
 """
 from __future__ import annotations
 
+import errno
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -161,10 +166,38 @@ def make_handler(path: Path):
     return Handler
 
 
-def run_server(path: Path, port: int = 8765) -> None:
+HOST = "127.0.0.1"
+
+
+def bind_server(handler, port: int, host: str = HOST, max_attempts: int = 50) -> ThreadingHTTPServer:
+    """Bind a ThreadingHTTPServer to the first free port at or above `port`.
+
+    Tries `port`, then `port + 1`, ... up to `max_attempts` candidates, skipping
+    any that are already in use, and returns the bound (not-yet-serving) server.
+    Binding in a loop avoids a check-then-bind race: the port we return is one we
+    actually hold. Raises OSError if the whole range is busy."""
+    last_err: OSError | None = None
+    for candidate in range(port, port + max_attempts):
+        try:
+            return ThreadingHTTPServer((host, candidate), handler)
+        except OSError as exc:
+            if exc.errno == errno.EADDRINUSE:
+                last_err = exc
+                continue
+            raise
+    raise OSError(
+        errno.EADDRINUSE,
+        f"no free port available in range {port}-{port + max_attempts - 1}",
+    ) from last_err
+
+
+def run_server(path: Path, port: int = 8765, host: str = HOST) -> None:
     core.init(Path(path))
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(path))
-    url = f"http://127.0.0.1:{port}/"
+    httpd = bind_server(make_handler(path), port, host)
+    actual = httpd.server_address[1]
+    url = f"http://{host}:{actual}/"
+    if actual != port:
+        print(f"port {port} was busy; using free port {actual} instead")
     print(f"new-product-backlog editor serving {path}")
     print(f"open {url} (Ctrl-C to stop)")
     try:

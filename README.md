@@ -214,8 +214,10 @@ These are what make the skill callable as a subprocess from *other* skills (in t
 
 ```bash
 python3 skills/new-product-backlog/scripts/backlog.py serve docs/backlog/product-backlog.json
-# then open http://127.0.0.1:8765/  (Ctrl-C to stop; override the port with --port N)
+# then open http://127.0.0.1:8765/  (Ctrl-C to stop; override the starting port with --port N)
 ```
+
+If the requested port is busy, `serve` scans upward to the next free port automatically and prints the URL it actually bound to.
 
 The server binds `127.0.0.1` only — no auth, single local user, not reachable from the network. The page itself is a self-contained HTML file (inline CSS/JS, no CDN, theme-aware) that lists all items and supports add/edit, delete (discard by default, hard-delete as an explicit option), column sort, multi-select status/priority filter chips, and text search across id/name/description/notes. It also warns when a dependency isn't yet `shipped`, or when `doNotBuildBefore` is in the future.
 
