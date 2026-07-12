@@ -195,7 +195,8 @@ body::before {
 .btn.icon { padding: 8px 10px; }
 
 .btn:focus-visible, .chip:focus-visible, input:focus-visible,
-textarea:focus-visible, select:focus-visible, .th-sort:focus-visible {
+textarea:focus-visible, select:focus-visible, .th-sort:focus-visible,
+.expand-btn:focus-visible, .art-link:focus-visible {
   outline: 2px solid var(--focus); outline-offset: 2px;
 }
 
@@ -345,6 +346,71 @@ tr.is-discarded { opacity: .62; }
 }
 .kebab:hover { background: var(--surface-3); color: var(--text); }
 .kebab:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* ---------- Row disclosure toggle ---------- */
+thead th.expand-col { padding: 0; width: 34px; }
+td.expand-cell { padding: 0 2px 0 6px; width: 34px; text-align: center; }
+.expand-btn {
+  all: unset; box-sizing: border-box; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 6px;
+  color: var(--faint);
+}
+.expand-btn:hover { background: var(--surface-3); color: var(--text); }
+.expand-btn.open { color: var(--accent); }
+.expand-btn .chev {
+  font-size: 10px; line-height: 1; display: inline-block;
+  transition: transform .14s ease;
+}
+.expand-btn.open .chev { transform: rotate(90deg); }
+
+/* ---------- Expanded detail drawer (full-width row beneath an item) ---------- */
+tr.detail-row, tr.detail-row:hover { background: var(--surface-2); }
+tr.detail-row > td.detail-cell { padding: 0; }
+.detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  gap: 16px 30px; align-items: start;
+  padding: 6px 18px 18px 6px;
+  border-top: 1px dashed var(--border);
+}
+.detail-block { min-width: 0; }
+.detail-block.notes { grid-column: 1 / -1; }
+.detail-label {
+  font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
+  font-weight: 700; color: var(--faint); margin-bottom: 8px;
+  display: flex; align-items: center; gap: 10px;
+}
+.detail-label::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.detail-desc, .detail-notes {
+  white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5;
+}
+.detail-desc { font-size: 13.5px; color: var(--text); }
+.detail-notes { font-size: 12.5px; color: var(--muted); }
+.detail-empty { font-size: 13px; color: var(--faint); font-style: italic; }
+.art-list { display: flex; flex-direction: column; gap: 7px; align-items: flex-start; }
+.art-link, .art-text {
+  display: inline-flex; align-items: baseline; gap: 9px; max-width: 100%;
+  font-size: 13px; padding: 5px 11px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface); text-decoration: none;
+}
+.art-link { color: var(--accent); }
+.art-link:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+.art-text { color: var(--muted); border-style: dashed; cursor: default; }
+.art-link .art-ic, .art-text .art-ic { font-size: 11px; color: var(--faint); flex: none; }
+.art-text .art-ic { color: var(--warn); }
+.art-link .art-label, .art-text .art-label { font-weight: 600; }
+.art-link .art-url, .art-text .art-url {
+  font-family: ui-monospace, monospace; font-size: 11px; color: var(--faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+
+@media (max-width: 680px) {
+  .detail { grid-template-columns: 1fr; }
+}
 
 /* ---------- Floating action menu (portal in body, never clipped) ---------- */
 .action-menu {
@@ -615,6 +681,7 @@ const state = {
   priorities: [],
   sortKey: "id",
   sortDir: "asc",
+  expanded: new Set(),   // ids of rows whose detail drawer is open (survives re-render)
 };
 
 const COLUMNS = [
@@ -627,6 +694,10 @@ const COLUMNS = [
   { key: "updatedAt", label: "Updated", sort: "updatedAt" },
   { key: "actions", label: "", sort: null },
 ];
+
+// Detail drawer's single <td> spans every column except the priority rail:
+// the disclosure column (+1) plus all COLUMNS entries.
+const DETAIL_COLSPAN = COLUMNS.length + 1;
 
 /* --- utilities --- */
 function todayStr() {
@@ -716,6 +787,7 @@ function buildHead() {
   const row = document.getElementById("head-row");
   row.textContent = "";
   row.append(h("th", { class: "rail-col", "aria-hidden": "true" }));
+  row.append(h("th", { class: "expand-col", "aria-hidden": "true" }));
   COLUMNS.forEach(function (col) {
     if (col.key === "actions") {
       row.append(h("th", { class: "actions-col", "aria-label": "Actions" }));
@@ -749,9 +821,18 @@ function onSort(key) {
 
 /* ---------- Table body ---------- */
 function refresh() {
+  pruneExpanded();
   syncChipStates();
   renderReadout();
   renderBody();
+}
+/* Drop expansion state for items that no longer exist (e.g. hard-deleted). */
+function pruneExpanded() {
+  if (!state.expanded.size) return;
+  const ids = new Set(state.items.map(function (i) { return i.id; }));
+  Array.from(state.expanded).forEach(function (id) {
+    if (!ids.has(id)) state.expanded.delete(id);
+  });
 }
 function renderReadout() {
   const readout = document.getElementById("readout");
@@ -816,6 +897,17 @@ function renderRow(it, byId) {
   rail.style.setProperty("--c", "var(--pr-" + it.priority + ")");
   tr.append(rail);
 
+  // disclosure toggle (keyboard-native <button>; never the whole row)
+  const isOpen = state.expanded.has(it.id);
+  const detailId = detailRowId(it.id);
+  const toggle = h("button", { class: "expand-btn" + (isOpen ? " open" : ""), type: "button",
+    "aria-expanded": isOpen ? "true" : "false",
+    "aria-controls": isOpen ? detailId : null,
+    "aria-label": (isOpen ? "Collapse" : "Expand") + " details for " + it.id,
+    onClick: function (e) { e.stopPropagation(); toggleExpand(it, byId, toggle); } },
+    h("span", { class: "chev", "aria-hidden": "true" }, "▸"));
+  tr.append(h("td", { class: "expand-cell" }, toggle));
+
   // id
   tr.append(h("td", { class: "id-cell mono" }, h("span", { class: "idtxt" }, it.id)));
 
@@ -874,7 +966,107 @@ function renderRow(it, byId) {
   actTd.append(kebab);
   tr.append(actTd);
 
+  if (!isOpen) return tr;
+  const frag = document.createDocumentFragment();
+  frag.append(tr, buildDetailRow(it, byId, detailId));
+  return frag;
+}
+
+/* ---------- Row detail drawer ---------- */
+function detailRowId(id) { return "detail-" + String(id).replace(/[^\w-]/g, "_"); }
+
+/* Toggle a row's drawer in place (keeps focus on the button) and record the
+   open/closed state on `state.expanded` so it survives the next re-render. */
+function toggleExpand(it, byId, btn) {
+  const tr = btn.closest("tr");
+  const detailId = detailRowId(it.id);
+  if (state.expanded.has(it.id)) {
+    state.expanded.delete(it.id);
+    btn.classList.remove("open");
+    btn.setAttribute("aria-expanded", "false");
+    btn.setAttribute("aria-label", "Expand details for " + it.id);
+    btn.removeAttribute("aria-controls");
+    const next = tr && tr.nextElementSibling;
+    if (next && next.classList.contains("detail-row")) next.remove();
+  } else {
+    state.expanded.add(it.id);
+    btn.classList.add("open");
+    btn.setAttribute("aria-expanded", "true");
+    btn.setAttribute("aria-label", "Collapse details for " + it.id);
+    btn.setAttribute("aria-controls", detailId);
+    if (tr) tr.after(buildDetailRow(it, byId, detailId));
+  }
+}
+
+function buildDetailRow(it, byId, detailId) {
+  const tr = h("tr", { class: "detail-row" + (it.status === "discarded" ? " is-discarded" : "") });
+  const rail = h("td", { class: "rail-col" });
+  rail.style.setProperty("--c", "var(--pr-" + it.priority + ")");
+  tr.append(rail);
+
+  const grid = h("div", { class: "detail" },
+    detailBlock("Description", it.description, "No description.", "detail-desc"),
+    detailArtifacts(it.artifacts),
+    detailBlock("Notes", it.notes, "No notes.", "detail-notes", "notes"));
+
+  tr.append(h("td", { class: "detail-cell", colspan: DETAIL_COLSPAN, id: detailId }, grid));
   return tr;
+}
+
+function detailBlock(label, value, emptyText, bodyClass, extraClass) {
+  const hasText = value != null && String(value).trim() !== "";
+  return h("section", { class: "detail-block" + (extraClass ? " " + extraClass : "") },
+    h("div", { class: "detail-label" }, label),
+    hasText ? h("div", { class: bodyClass }, String(value))
+            : h("div", { class: "detail-empty" }, emptyText));
+}
+
+function detailArtifacts(artifacts) {
+  const section = h("section", { class: "detail-block" }, h("div", { class: "detail-label" }, "Artifacts"));
+  const arts = Array.isArray(artifacts) ? artifacts : [];
+  if (!arts.length) {
+    section.append(h("div", { class: "detail-empty" }, "No artifacts."));
+    return section;
+  }
+  const list = h("div", { class: "art-list" });
+  arts.forEach(function (a) { list.append(renderArtifact(a)); });
+  section.append(list);
+  return section;
+}
+
+/* Build one artifact entry. A link only for http(s) or relative URLs; anything
+   else (e.g. javascript:) is rendered as inert plain text, never a link. */
+function renderArtifact(a) {
+  const rawUrl = a && a.url != null ? String(a.url) : "";
+  const rawLabel = a && a.label != null ? String(a.label) : "";
+  const label = rawLabel.trim() || rawUrl.trim() || "artifact";
+  const href = safeArtifactUrl(rawUrl);
+
+  if (href) {
+    const link = h("a", { class: "art-link", target: "_blank", rel: "noopener noreferrer" },
+      h("span", { class: "art-ic", "aria-hidden": "true" }, "↗"),
+      h("span", { class: "art-label" }, label),
+      rawUrl.trim() ? h("span", { class: "art-url" }, rawUrl) : null);
+    link.setAttribute("href", href);   // sanitized value only
+    return link;
+  }
+  return h("span", { class: "art-text", title: "Link withheld: unsupported URL scheme" },
+    h("span", { class: "art-ic", "aria-hidden": "true" }, "⚠"),
+    h("span", { class: "art-label" }, label),
+    rawUrl.trim() ? h("span", { class: "art-url" }, rawUrl) : null);
+}
+
+/* Allow only http:/https: absolute URLs and scheme-less relative paths.
+   Returns a safe href string, or null when the URL must not become a link. */
+function safeArtifactUrl(raw) {
+  const url = (raw == null ? "" : String(raw)).trim();
+  if (!url) return null;
+  // Strip chars a browser would ignore, which could otherwise hide a scheme
+  // (e.g. "java\tscript:"), then test for a leading URI scheme.
+  const probe = url.replace(/[\u0000-\u0020\u007f-\u009f]/g, "").toLowerCase();
+  const m = probe.match(/^([a-z][a-z0-9+.-]*):/);
+  if (m) return (m[1] === "http" || m[1] === "https") ? url : null;
+  return url;   // no scheme => relative path (/, ./, ../, or bare) => allowed
 }
 
 function clearFilters() {
