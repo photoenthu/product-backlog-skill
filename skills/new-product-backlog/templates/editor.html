@@ -224,6 +224,21 @@ textarea:focus-visible, select:focus-visible, .th-sort:focus-visible,
   font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
   color: var(--faint); font-weight: 700; margin-right: 2px;
 }
+.toggle {
+  font-size: 12.5px; font-weight: 600; cursor: pointer; user-select: none;
+  border: 1px solid var(--border); background: var(--chip-bg); color: var(--muted);
+  border-radius: 999px; padding: 5px 11px;
+  display: inline-flex; align-items: center; gap: 7px;
+  transition: border-color .12s, color .12s, background .12s;
+}
+.toggle:hover { color: var(--text); border-color: var(--border-2); }
+.toggle input { accent-color: var(--block); margin: 0; cursor: pointer; }
+.toggle:has(input:checked) {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--block) 60%, var(--border-2));
+  background: color-mix(in srgb, var(--block) 12%, var(--surface));
+}
+.toggle:focus-within { outline: 2px solid color-mix(in srgb, var(--block) 55%, transparent); outline-offset: 1px; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .chip {
   font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
@@ -583,6 +598,12 @@ tr.detail-row > td.detail-cell { padding: 0; }
       <span class="label">Priority</span>
       <div class="chips" id="priority-chips"></div>
     </div>
+    <div class="filter-group">
+      <label class="toggle" for="hide-blocked">
+        <input type="checkbox" id="hide-blocked">
+        <span>Hide Blocked</span>
+      </label>
+    </div>
   </div>
 
   <div class="table-wrap" id="table-wrap">
@@ -606,7 +627,19 @@ function applyFilters(items, opts) {
   const sortDir = opts.sortDir === "desc" ? "desc" : "asc";
   const PRIORITY_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
 
+  /* Blockedness is resolved against the FULL input list, before any filtering,
+     so a dependency hidden by the status/search filters still blocks its
+     dependents. Mirrors warningsFor()'s "blocked" rule: a dep that is missing
+     or not shipped blocks. Embargo is not part of this filter. */
+  const hideBlocked = opts.hideBlocked === true;
+  const statusById = {};
+  items.forEach(function (it) { statusById[it.id] = it.status; });
+  const isBlocked = function (it) {
+    return (it.dependencies || []).some(function (d) { return statusById[d] !== "shipped"; });
+  };
+
   let out = items.filter(function (it) {
+    if (hideBlocked && isBlocked(it)) return false;
     if (statuses.length && statuses.indexOf(it.status) === -1) return false;
     if (priorities.length && priorities.indexOf(it.priority) === -1) return false;
     if (search) {
@@ -696,6 +729,7 @@ const state = {
   search: "",
   statuses: [],
   priorities: [],
+  hideBlocked: false,    // when true, drop items waiting on an unshipped dependency
   sortKey: "id",
   sortDir: "asc",
   expanded: new Set(),   // ids of rows whose detail drawer is open (survives re-render)
@@ -878,6 +912,7 @@ function renderBody() {
     search: state.search,
     statuses: state.statuses,
     priorities: state.priorities,
+    hideBlocked: state.hideBlocked,
     sortKey: state.sortKey,
     sortDir: state.sortDir,
   });
@@ -1172,7 +1207,9 @@ function clearFilters() {
   state.search = "";
   state.statuses = [];
   state.priorities = [];
+  state.hideBlocked = false;
   document.getElementById("search").value = "";
+  document.getElementById("hide-blocked").checked = false;
   persistView();
   refresh();
 }
@@ -1196,6 +1233,7 @@ function persistView() {
       search: state.search,
       statuses: state.statuses,
       priorities: state.priorities,
+      hideBlocked: state.hideBlocked,
       sortKey: state.sortKey,
       sortDir: state.sortDir,
     }));
@@ -1222,6 +1260,7 @@ function restoreView() {
       return state.priorityValues.indexOf(p) !== -1;
     });
   }
+  if (typeof saved.hideBlocked === "boolean") state.hideBlocked = saved.hideBlocked;
   if (sortableKeys().indexOf(saved.sortKey) !== -1) state.sortKey = saved.sortKey;
   if (saved.sortDir === "asc" || saved.sortDir === "desc") state.sortDir = saved.sortDir;
 }
@@ -1483,6 +1522,9 @@ async function boot() {
   searchInput.addEventListener("input", function (e) {
     state.search = e.target.value; persistView(); renderBody();
   });
+  document.getElementById("hide-blocked").addEventListener("change", function (e) {
+    state.hideBlocked = e.target.checked; persistView(); renderBody();
+  });
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape") { if (menuOpen) closeRowMenu(); else if (modalState) closeModal(); }
   });
@@ -1517,6 +1559,7 @@ async function boot() {
   // already read from `state`; only the search input needs an explicit sync.
   restoreView();
   searchInput.value = state.search;
+  document.getElementById("hide-blocked").checked = state.hideBlocked;
 
   buildChips();
   buildHead();
