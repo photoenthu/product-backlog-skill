@@ -559,6 +559,17 @@ tr.detail-row > td.detail-cell { padding: 0; }
 .art-add { margin-top: 2px; }
 .hint { font-size: 12px; color: var(--faint); margin-top: 6px; }
 
+/* Groom modal: one required free-text concern, narrower than the edit form. */
+.modal.groom { max-width: 520px; }
+.modal-head .subject { margin-top: 5px; font-size: 13px; color: var(--muted); }
+.field textarea.groom-in { min-height: 140px; }
+
+/* Disabled buttons (Groom's OK before a concern is typed; Implement with an
+   empty selection) must not light up on hover. */
+.btn[disabled] { opacity: .5; cursor: not-allowed; }
+.btn[disabled]:hover { background: var(--surface); border-color: var(--border-2); }
+.btn.primary[disabled]:hover { background: var(--accent); border-color: var(--accent); }
+
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
 
@@ -1312,6 +1323,8 @@ function openRowMenu(item, anchor) {
     h("button", { type: "button", role: "menuitem",
       onClick: function () { closeRowMenu(); openModal(item.id); } }, "Edit"),
     h("button", { type: "button", role: "menuitem",
+      onClick: function () { closeRowMenu(); openGroomModal(item); } }, "Groom"),
+    h("button", { type: "button", role: "menuitem",
       onClick: function () { closeRowMenu(); doDiscard(item); } }, "Discard"),
     h("div", { class: "sep" }),
     h("button", { class: "danger", type: "button", role: "menuitem",
@@ -1492,6 +1505,78 @@ function buildDepPicker(editingId) {
 function closeModal() {
   document.getElementById("modal-root").textContent = "";
   modalState = null;
+}
+
+/* ---------- Groom modal ----------
+   Captures one free-text concern and copies a /backlog-analyzer prompt. The
+   skill hard-gates on a non-empty concern, so OK stays disabled until one is
+   typed. A failed clipboard write keeps the modal open — closing it would
+   throw away text the user just typed with no way to recover it. */
+function openGroomModal(item) {
+  closeRowMenu();
+  // Shares `modalState` with the edit modal so the Escape handler and
+  // #modal-root teardown work unchanged, and the two can never both be open.
+  modalState = { kind: "groom", editingId: null };
+
+  const errBox = h("div", { class: "modal-error" });
+  const concernIn = h("textarea", { class: "groom-in", id: "f-concern", required: true,
+    placeholder: "e.g. a recent fix may already have resolved this" });
+  const okBtn = h("button", { class: "btn primary", type: "submit", disabled: true,
+    onClick: function () { form.requestSubmit(); } }, "Copy prompt");
+
+  concernIn.addEventListener("input", function () {
+    okBtn.disabled = concernIn.value.trim() === "";
+  });
+  concernIn.addEventListener("keydown", function (e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      if (!okBtn.disabled) form.requestSubmit();
+    }
+  });
+
+  const form = h("form", { onSubmit: function (e) {
+      e.preventDefault();
+      submitGroom(item, concernIn, errBox);
+    } },
+    errBox,
+    h("div", { class: "field" },
+      h("label", { for: "f-concern" }, "Your concern / feedback",
+        h("span", { class: "req" }, "*")),
+      concernIn,
+      h("div", { class: "hint" },
+        "What worries you about this entry — stale, already fixed, unclear value?")));
+
+  const root = document.getElementById("modal-root");
+  root.textContent = "";
+  const scrim = h("div", { class: "scrim",
+    onClick: function (e) { if (e.target === scrim) closeModal(); } },
+    h("div", { class: "modal groom", role: "dialog", "aria-modal": "true",
+               "aria-label": "Groom " + item.id },
+      h("div", { class: "modal-head" },
+        h("div", null,
+          h("div", { class: "eyebrow" }, "Groom item"),
+          h("h2", null, item.id),
+          h("div", { class: "subject" }, item.name)),
+        h("button", { class: "x", type: "button", "aria-label": "Close",
+                      onClick: closeModal }, "✕")),
+      h("div", { class: "modal-body" }, form),
+      h("div", { class: "modal-foot" },
+        h("button", { class: "btn", type: "button", onClick: closeModal }, "Cancel"),
+        okBtn)));
+  root.append(scrim);
+  setTimeout(function () { concernIn.focus(); }, 0);
+}
+
+function submitGroom(item, concernIn, errBox) {
+  const text = groomPrompt(item.id, concernIn.value);
+  copyToClipboard(text).then(function (ok) {
+    if (ok) { closeModal(); return; }
+    errBox.textContent = "";
+    errBox.append(h("span", { class: "etitle" }, "Could not copy. "),
+      "Your browser blocked clipboard access. Copy this prompt manually:\n\n" + text);
+    errBox.classList.add("show");
+    errBox.scrollIntoView({ block: "nearest" });
+  });
 }
 
 async function saveModal(f) {
