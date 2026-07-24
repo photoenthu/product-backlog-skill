@@ -1077,6 +1077,42 @@ function backlogPrompt(id, mode) {
 }
 // </backlogPrompt>
 
+// <groomPrompt>
+function groomPrompt(id, concern) {
+  // The concern is trimmed but its interior newlines are kept, so a multi-line
+  // worry pastes as written. The template's final period is skipped when the
+  // concern already ends in terminal punctuation (otherwise: "…stale..").
+  const body = String(concern == null ? "" : concern).trim();
+  const tail = /[.?!]$/.test(body) ? "" : ".";
+  return "Run the /backlog-analyzer skill for " + id +
+    ". User's concern/feedback is: " + body + tail;
+}
+// </groomPrompt>
+
+// <sortBacklogIds>
+function sortBacklogIds(ids) {
+  // Board order, not click order: compare the numeric part so BL-9 precedes
+  // BL-107 (a plain string sort would not). Ties fall back to the raw string
+  // so zero-padded variants stay deterministic.
+  const num = function (id) {
+    const m = String(id).match(/(\d+)/);
+    return m ? parseInt(m[1], 10) : 0;
+  };
+  return ids.slice().sort(function (a, b) {
+    const d = num(a) - num(b);
+    return d !== 0 ? d : String(a).localeCompare(String(b));
+  });
+}
+// </sortBacklogIds>
+
+// <implementPrompt>
+function implementPrompt(ids) {
+  // Takes the ids in the order given — the caller sorts with sortBacklogIds.
+  return "Run the /master-backlog-executor skill for these backlog ids: " +
+    ids.join(", ") + ".";
+}
+// </implementPrompt>
+
 function legacyCopy(text) {
   try {
     const ta = document.createElement("textarea");
