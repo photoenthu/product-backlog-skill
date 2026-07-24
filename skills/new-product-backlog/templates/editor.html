@@ -379,6 +379,22 @@ td.expand-cell { padding: 0 2px 0 6px; width: 34px; text-align: center; }
 }
 .expand-btn.open .chev { transform: rotate(90deg); }
 
+/* ---------- Batch-select column ---------- */
+thead th.select-col { padding: 0 2px 0 8px; width: 30px; }
+td.select-cell { padding: 0 2px 0 8px; width: 30px; text-align: center; }
+.row-check {
+  margin: 0; cursor: pointer; accent-color: var(--accent);
+  width: 15px; height: 15px; vertical-align: middle;
+}
+.row-check:disabled { cursor: not-allowed; opacity: .4; }
+.row-check:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* Copy feedback on the header Implement button (mirrors .exec-btn's). */
+.btn.is-copied { color: var(--st-shipped); border-color: currentColor; }
+.btn.is-failed { color: var(--block); border-color: currentColor; }
+.btn .exec-ic { font-size: 11px; color: var(--faint); }
+.btn.is-copied .exec-ic, .btn.is-failed .exec-ic { color: currentColor; }
+
 /* ---------- Expanded detail drawer (full-width row beneath an item) ---------- */
 tr.detail-row, tr.detail-row:hover { background: var(--surface-2); }
 tr.detail-row > td.detail-cell { padding: 0; }
@@ -592,6 +608,10 @@ tr.detail-row > td.detail-cell { padding: 0; }
     </div>
     <div class="header-actions">
       <button class="btn icon" id="theme-toggle" title="Toggle theme" aria-label="Toggle color theme">◑</button>
+      <button class="btn" id="implement-btn" type="button" disabled
+              title="Copy a master-backlog-executor prompt for the selected items">
+        <span class="exec-ic" aria-hidden="true">⧉</span><span class="implement-label">Implement</span>
+      </button>
       <button class="btn primary" id="new-btn">+ New item</button>
     </div>
   </header>
@@ -744,6 +764,8 @@ const state = {
   sortKey: "id",
   sortDir: "asc",
   expanded: new Set(),   // ids of rows whose detail drawer is open (survives re-render)
+  selected: new Set(),   // ids ticked for the batch Implement prompt (never persisted)
+  visibleIds: [],        // ids drawn by the last renderBody(), in display order
 };
 
 const COLUMNS = [
@@ -758,8 +780,8 @@ const COLUMNS = [
 ];
 
 // Detail drawer's single <td> spans every column except the priority rail:
-// the disclosure column (+1) plus all COLUMNS entries.
-const DETAIL_COLSPAN = COLUMNS.length + 1;
+// the checkbox column (+1), the disclosure column (+1), and all COLUMNS entries.
+const DETAIL_COLSPAN = COLUMNS.length + 2;
 
 /* --- utilities --- */
 function todayStr() {
@@ -849,6 +871,7 @@ function buildHead() {
   const row = document.getElementById("head-row");
   row.textContent = "";
   row.append(h("th", { class: "rail-col", "aria-hidden": "true" }));
+  row.append(h("th", { class: "select-col" }, buildSelectAll()));
   row.append(h("th", { class: "expand-col", "aria-hidden": "true" }));
   COLUMNS.forEach(function (col) {
     if (col.key === "actions") {
@@ -871,6 +894,14 @@ function buildHead() {
     row.append(th);
   });
 }
+/* Select-all ticks only the rows currently visible — a select-all that reached
+   filtered-out rows would silently batch items the user can't see. */
+function buildSelectAll() {
+  const cb = h("input", { type: "checkbox", class: "row-check", id: "select-all",
+    "aria-label": "Select all visible items for batch implement",
+    onChange: function () { toggleSelectAllVisible(cb.checked); } });
+  return cb;
+}
 function onSort(key) {
   if (state.sortKey === key) {
     state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
@@ -884,17 +915,22 @@ function onSort(key) {
 
 /* ---------- Table body ---------- */
 function refresh() {
-  pruneExpanded();
+  pruneStale();
   syncChipStates();
   renderReadout();
   renderBody();
+  syncSelectionUI();
 }
-/* Drop expansion state for items that no longer exist (e.g. hard-deleted). */
-function pruneExpanded() {
-  if (!state.expanded.size) return;
+/* Drop expansion + selection state for items that no longer exist (e.g.
+   hard-deleted here or edited away in another session). */
+function pruneStale() {
+  if (!state.expanded.size && !state.selected.size) return;
   const ids = new Set(state.items.map(function (i) { return i.id; }));
   Array.from(state.expanded).forEach(function (id) {
     if (!ids.has(id)) state.expanded.delete(id);
+  });
+  Array.from(state.selected).forEach(function (id) {
+    if (!ids.has(id)) state.selected.delete(id);
   });
 }
 function renderReadout() {
@@ -928,6 +964,8 @@ function renderBody() {
     sortDir: state.sortDir,
   });
 
+  state.visibleIds = rows.map(function (r) { return r.id; });
+
   if (!rows.length) {
     empty.style.display = "";
     empty.textContent = "";
@@ -960,6 +998,22 @@ function renderRow(it, byId) {
   const rail = h("td", { class: "rail-col" });
   rail.style.setProperty("--c", "var(--pr-" + it.priority + ")");
   tr.append(rail);
+
+  // batch-select checkbox. Discarded rows are unselectable: master-backlog-
+  // executor's pre-flight declines the ENTIRE batch if any id is discarded,
+  // so one slipped-in id would waste a whole run.
+  const isDiscarded = it.status === "discarded";
+  const check = h("input", { type: "checkbox", class: "row-check",
+    "aria-label": "Select " + it.id + " for batch implement",
+    disabled: isDiscarded || null,
+    title: isDiscarded ? "Discarded items can't be implemented" : null,
+    onChange: function () {
+      if (check.checked) state.selected.add(it.id);
+      else state.selected.delete(it.id);
+      syncSelectionUI();
+    } });
+  check.checked = state.selected.has(it.id) && !isDiscarded;
+  tr.append(h("td", { class: "select-cell" }, check));
 
   // disclosure toggle (keyboard-native <button>; never the whole row)
   const isOpen = state.expanded.has(it.id);
@@ -1034,6 +1088,69 @@ function renderRow(it, byId) {
   const frag = document.createDocumentFragment();
   frag.append(tr, buildDetailRow(it, byId, detailId));
   return frag;
+}
+
+/* ---------- Batch selection ---------- */
+
+/* Visible AND selectable (discarded rows can't be batched). */
+function selectableVisible() {
+  const byId = itemsById();
+  return state.visibleIds.filter(function (id) {
+    const it = byId[id];
+    return it && it.status !== "discarded";
+  });
+}
+
+/* Reflect state.selected into the Implement button and the select-all
+   tri-state. Deliberately does NOT re-render the body: a re-render on every
+   tick would collapse any open detail drawer mid-selection. */
+function syncSelectionUI() {
+  const n = state.selected.size;
+  const btn = document.getElementById("implement-btn");
+  if (btn) {
+    btn.disabled = n === 0;
+    const lab = btn.querySelector(".implement-label");
+    // Leave the label alone while it's flashing "Copied" / "Copy failed".
+    const flashing = btn.classList.contains("is-copied") || btn.classList.contains("is-failed");
+    if (lab && !flashing) lab.textContent = n ? "Implement (" + n + ")" : "Implement";
+  }
+  const all = document.getElementById("select-all");
+  if (all) {
+    const sel = selectableVisible();
+    const on = sel.filter(function (id) { return state.selected.has(id); }).length;
+    all.checked = sel.length > 0 && on === sel.length;
+    all.indeterminate = on > 0 && on < sel.length;
+    all.disabled = sel.length === 0;
+  }
+}
+
+/* Unticking clears every visible id (including any discarded row that somehow
+   carries a stale selection); ticking adds only the selectable ones. */
+function toggleSelectAllVisible(on) {
+  if (on) {
+    selectableVisible().forEach(function (id) { state.selected.add(id); });
+  } else {
+    state.visibleIds.forEach(function (id) { state.selected.delete(id); });
+  }
+  renderBody();          // every row's checkbox must re-reflect the new state
+  syncSelectionUI();
+}
+
+/* Selection is intentionally kept after copying, so the batch can be re-copied
+   without re-ticking. */
+function copySelectedImplementPrompt() {
+  const ids = sortBacklogIds(Array.from(state.selected));
+  if (!ids.length) return;
+  const btn = document.getElementById("implement-btn");
+  const lab = btn.querySelector(".implement-label");
+  copyToClipboard(implementPrompt(ids)).then(function (ok) {
+    lab.textContent = ok ? "Copied" : "Copy failed";
+    btn.classList.add(ok ? "is-copied" : "is-failed");
+    setTimeout(function () {
+      btn.classList.remove("is-copied", "is-failed");
+      syncSelectionUI();
+    }, 1400);
+  });
 }
 
 /* ---------- Row detail drawer ---------- */
@@ -1639,6 +1756,8 @@ async function boot() {
   initTheme();
 
   document.getElementById("new-btn").addEventListener("click", function () { openModal(null); });
+  document.getElementById("implement-btn")
+    .addEventListener("click", copySelectedImplementPrompt);
   const searchInput = document.getElementById("search");
   searchInput.addEventListener("input", function (e) {
     state.search = e.target.value; persistView(); renderBody();
