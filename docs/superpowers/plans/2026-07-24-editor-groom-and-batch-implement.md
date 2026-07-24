@@ -526,6 +526,11 @@ function pruneStale() {
 }
 ```
 
+_The shipped version also evicts ids whose status is `discarded` from
+`state.selected` (a ticked item that gets discarded before the batch is
+copied would otherwise linger in it, wasting the executor's whole-batch
+run) — added in commit `64b3518`._
+
 And update `refresh()` to call it and to re-sync the selection chrome after the body is drawn:
 
 ```js
@@ -799,6 +804,7 @@ git commit -m "docs(new-product-backlog): document Groom + batch Implement; bump
 | Select-all scoped to visible rows, with indeterminate state | 3 (Steps 5, 8) |
 | Selection survives filtering; count in the button label | 3 (Steps 8, 11.6) |
 | Discarded rows' checkbox disabled | 3 (Step 7) |
+| An already-ticked item is evicted from `state.selected` the instant its status becomes `discarded` | 3 (Step 4) |
 | Selection not persisted to `localStorage` | 3 (Step 3 — no `persistView` change; verified 11.9) |
 | Ticking never re-renders the body | 3 (Step 8 `syncSelectionUI`; verified 11.8) |
 | `pruneExpanded()` → `pruneStale()`, widened | 3 (Step 4) |

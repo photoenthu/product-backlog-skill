@@ -98,7 +98,10 @@ selected: new Set(),   // ids ticked for the batch Implement prompt
 
 `pruneExpanded()` is renamed `pruneStale()` and widened to evict ids dropped
 from the backlog — hard-deleted elsewhere, or gone after a refresh — from both
-`state.expanded` and `state.selected`. `restoreView()` /
+`state.expanded` and `state.selected`. For `state.selected` only, ids whose
+status has become `discarded` are evicted as well, so a ticked-then-discarded
+item can't linger in the batch; `state.expanded`'s eviction stays scoped to
+the missing-id case only. `restoreView()` /
 `persistView()` are untouched: selection is deliberately not persisted.
 
 ### Table
@@ -143,7 +146,8 @@ The modal reuses `.scrim` / `.modal` / `.modal-head` / `.modal-body` /
 - Body: a `<form>` with one required `<textarea>` (`min-height: 140px`), label
   `Your concern / feedback`, and a `.hint` reading *"What worries you about
   this entry — stale, already fixed, unclear value?"*. Autofocused.
-- Foot: `Cancel` (ghost) + primary `Copy prompt`, the latter `disabled` while
+- Foot: `Cancel` (plain `.btn`, matching the pre-existing edit modal's
+  Cancel) + primary `Copy prompt`, the latter `disabled` while
   the trimmed value is empty (re-evaluated on `input`). `⌘/Ctrl-Enter` submits.
 - Submit → `copyToClipboard(groomPrompt(id, concern))`. On success, close the
   modal. On failure, keep it open and render the inline `.modal-error` band.

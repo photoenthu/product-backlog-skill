@@ -25,6 +25,50 @@ const groomPrompt = extract("groomPrompt");
 const implementPrompt = extract("implementPrompt");
 const sortBacklogIds = extract("sortBacklogIds");
 
+/* ---------- Whole-script parse guard ----------
+ *
+ * Everything above only extracts and evaluates four ~10-line sentinel blocks
+ * out of a 45,000-character <script>. That extraction is blind to the other
+ * ~99% of the script: a syntax error anywhere outside a sentinel block, a
+ * call site that got typo'd (e.g. `groomPromt(...)`), or a helper that is
+ * defined but never wired to any button, would all sail through every
+ * assertion above while leaving the real page's boot() throwing at parse or
+ * runtime time and the table rendering as a blank shell. This suite is the
+ * named gate after every editor change, so it needs to at least catch that
+ * class of failure — hence the two checks below. */
+
+// Pull the single inline <script> block out of the template.
+const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
+assert.ok(scriptMatch, "editor.html: <script> block not found");
+const scriptSource = scriptMatch[1];
+
+// `new Function(...)` compiles the source without executing it, so a syntax
+// error anywhere in the script — not just inside the four sentinel blocks —
+// throws here. It never touches `document`/`window`, so this is safe outside
+// a browser. Do NOT eval() or run this: we only want the parse check.
+assert.doesNotThrow(
+  () => new Function(scriptSource),
+  "editor.html's <script> block failed to parse — boot() would never run " +
+    "and the page would render as a blank table shell",
+);
+
+// Each helper must appear at least twice in the source: once for its
+// `function name(...)` definition and at least once more for a real call
+// site. A count of exactly 1 means the helper is defined but never called
+// (dead code, or its call site was renamed/typo'd elsewhere in the script) —
+// a bug the sentinel-block extraction above can never see, since it only
+// looks at the helper's own definition. `>=` rather than `=== 2` because a
+// helper legitimately gaining a second call site later must not fail this.
+for (const name of ["backlogPrompt", "groomPrompt", "implementPrompt", "sortBacklogIds"]) {
+  const occurrences = scriptSource.split(name + "(").length - 1;
+  assert.ok(
+    occurrences >= 2,
+    `${name}: expected >= 2 occurrences of "${name}(" (one definition + at ` +
+      `least one call site) but found ${occurrences} — this means ${name} ` +
+      "is defined but never called, or its call site was renamed/typo'd",
+  );
+}
+
 /* ---------- Auto / Semi (pre-existing contract) ---------- */
 
 // Auto -> pr-from-backlog
@@ -129,10 +173,23 @@ assert.deepEqual(
   ["BL-9", "BL-12", "BL-107"],
 );
 
-// Zero-padded and unpadded ids of the same number compare by number.
+// Three distinct numeric parts (30, 4, 2) sort purely numerically — this
+// does NOT exercise the tie-break (no two ids here share a number).
 assert.deepEqual(
   sortBacklogIds(["BL-30", "BL-004", "BL-2"]),
   ["BL-2", "BL-004", "BL-30"],
+);
+
+// Tie-break: two ids with the SAME numeric part (4) fall back to
+// localeCompare on the raw string, which puts "BL-04" before "BL-4" ('0' <
+// '4'). Order determined empirically, not assumed — this is purely a
+// determinism guarantee for sortBacklogIds itself: the backlog CLI mints
+// zero-padded ids monotonically, so two *live* ids can never actually share
+// a number. Fed in reverse of the expected output to prove the comparator
+// is doing the reordering, not incidental input/Array.sort stability.
+assert.deepEqual(
+  sortBacklogIds(["BL-4", "BL-04"]),
+  ["BL-04", "BL-4"],
 );
 
 // Does not mutate its input.
