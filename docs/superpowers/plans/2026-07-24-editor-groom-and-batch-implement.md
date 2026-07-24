@@ -415,7 +415,7 @@ python3 skills/new-product-backlog/scripts/backlog.py serve /tmp/pb-groom-check.
 ```
 
 Open the printed URL and confirm, in order:
-1. A row's `⋯` menu lists **Edit · Groom · ─── · Discard · Delete**.
+1. A row's `⋯` menu lists **Edit · Groom · Discard · ─── · Delete** (the divider stays where it already was, above Delete).
 2. `Groom` opens a modal headed `GROOM ITEM` / the id / the item name, with the textarea focused.
 3. `Copy prompt` is greyed out and unclickable; typing a space keeps it disabled; typing a word enables it.
 4. Typing `it looks stale` and clicking `Copy prompt` closes the modal, and pasting gives exactly:

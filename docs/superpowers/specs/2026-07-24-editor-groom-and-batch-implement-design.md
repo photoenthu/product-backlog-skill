@@ -44,7 +44,7 @@ that captures the concern in a modal, and **checkbox multi-select** feeding an
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Where Groom lives | **Kebab menu, second entry** (`Edit · Groom · ─── · Discard · Delete`) | The kebab is already the home for item-scoped actions; the drawer's Auto/Semi row is for zero-input one-click prompts, and Groom needs input. |
+| Where Groom lives | **Kebab menu, second entry** (`Edit · Groom · Discard · ─── · Delete` — the existing divider stays put, fencing off the one irreversible action) | The kebab is already the home for item-scoped actions; the drawer's Auto/Semi row is for zero-input one-click prompts, and Groom needs input. |
 | Empty concern | **Blocks submit** (primary button disabled until non-blank) | `backlog-analyzer` hard-gates on a concern and would just ask again — better to catch it in the modal than burn a round-trip. |
 | Clipboard failure on Groom | **Keep the modal open, show inline error** | The typed concern is unrecoverable if the modal closes on a failed copy. |
 | Trailing punctuation | **Skip the template's final `.` when the concern already ends in `.`/`?`/`!`** | Avoids `…is: it's stale..` — the only deviation from the literal template, and a cosmetic one. |
