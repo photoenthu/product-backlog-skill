@@ -1761,9 +1761,11 @@ async function boot() {
   const searchInput = document.getElementById("search");
   searchInput.addEventListener("input", function (e) {
     state.search = e.target.value; persistView(); renderBody();
+    // Visibility change invalidates the select-all tri-state; rebuild it.
+    syncSelectionUI();
   });
   document.getElementById("hide-blocked").addEventListener("change", function (e) {
-    state.hideBlocked = e.target.checked; persistView(); renderBody();
+    state.hideBlocked = e.target.checked; persistView(); renderBody(); syncSelectionUI();
   });
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape") { if (menuOpen) closeRowMenu(); else if (modalState) closeModal(); }
