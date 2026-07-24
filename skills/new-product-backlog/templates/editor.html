@@ -922,15 +922,18 @@ function refresh() {
   syncSelectionUI();
 }
 /* Drop expansion + selection state for items that no longer exist (e.g.
-   hard-deleted here or edited away in another session). */
+   hard-deleted here or edited away in another session). For the batch
+   selection, also drop discarded items: a discarded id in the executor
+   batch makes the skill decline the whole run. */
 function pruneStale() {
   if (!state.expanded.size && !state.selected.size) return;
   const ids = new Set(state.items.map(function (i) { return i.id; }));
+  const discardedIds = new Set(state.items.filter(function (i) { return i.status === "discarded"; }).map(function (i) { return i.id; }));
   Array.from(state.expanded).forEach(function (id) {
     if (!ids.has(id)) state.expanded.delete(id);
   });
   Array.from(state.selected).forEach(function (id) {
-    if (!ids.has(id)) state.selected.delete(id);
+    if (!ids.has(id) || discardedIds.has(id)) state.selected.delete(id);
   });
 }
 function renderReadout() {
