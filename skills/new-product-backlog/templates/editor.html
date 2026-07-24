@@ -379,6 +379,22 @@ td.expand-cell { padding: 0 2px 0 6px; width: 34px; text-align: center; }
 }
 .expand-btn.open .chev { transform: rotate(90deg); }
 
+/* ---------- Batch-select column ---------- */
+thead th.select-col { padding: 0 2px 0 8px; width: 30px; }
+td.select-cell { padding: 0 2px 0 8px; width: 30px; text-align: center; }
+.row-check {
+  margin: 0; cursor: pointer; accent-color: var(--accent);
+  width: 15px; height: 15px; vertical-align: middle;
+}
+.row-check:disabled { cursor: not-allowed; opacity: .4; }
+.row-check:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* Copy feedback on the header Implement button (mirrors .exec-btn's). */
+.btn.is-copied { color: var(--st-shipped); border-color: currentColor; }
+.btn.is-failed { color: var(--block); border-color: currentColor; }
+.btn .exec-ic { font-size: 11px; color: var(--faint); }
+.btn.is-copied .exec-ic, .btn.is-failed .exec-ic { color: currentColor; }
+
 /* ---------- Expanded detail drawer (full-width row beneath an item) ---------- */
 tr.detail-row, tr.detail-row:hover { background: var(--surface-2); }
 tr.detail-row > td.detail-cell { padding: 0; }
@@ -559,6 +575,17 @@ tr.detail-row > td.detail-cell { padding: 0; }
 .art-add { margin-top: 2px; }
 .hint { font-size: 12px; color: var(--faint); margin-top: 6px; }
 
+/* Groom modal: one required free-text concern, narrower than the edit form. */
+.modal.groom { max-width: 520px; }
+.modal-head .subject { margin-top: 5px; font-size: 13px; color: var(--muted); }
+.field textarea.groom-in { min-height: 140px; }
+
+/* Disabled buttons (Groom's OK before a concern is typed; Implement with an
+   empty selection) must not light up on hover. */
+.btn[disabled] { opacity: .5; cursor: not-allowed; }
+.btn[disabled]:hover { background: var(--surface); border-color: var(--border-2); }
+.btn.primary[disabled]:hover { background: var(--accent); border-color: var(--accent); }
+
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
 
@@ -581,6 +608,10 @@ tr.detail-row > td.detail-cell { padding: 0; }
     </div>
     <div class="header-actions">
       <button class="btn icon" id="theme-toggle" title="Toggle theme" aria-label="Toggle color theme">◑</button>
+      <button class="btn" id="implement-btn" type="button" disabled
+              title="Copy a master-backlog-executor prompt for the selected items">
+        <span class="exec-ic" aria-hidden="true">⧉</span><span class="implement-label">Implement</span>
+      </button>
       <button class="btn primary" id="new-btn">+ New item</button>
     </div>
   </header>
@@ -733,6 +764,8 @@ const state = {
   sortKey: "id",
   sortDir: "asc",
   expanded: new Set(),   // ids of rows whose detail drawer is open (survives re-render)
+  selected: new Set(),   // ids ticked for the batch Implement prompt (never persisted)
+  visibleIds: [],        // ids drawn by the last renderBody(), in display order
 };
 
 const COLUMNS = [
@@ -747,8 +780,8 @@ const COLUMNS = [
 ];
 
 // Detail drawer's single <td> spans every column except the priority rail:
-// the disclosure column (+1) plus all COLUMNS entries.
-const DETAIL_COLSPAN = COLUMNS.length + 1;
+// the checkbox column (+1), the disclosure column (+1), and all COLUMNS entries.
+const DETAIL_COLSPAN = COLUMNS.length + 2;
 
 /* --- utilities --- */
 function todayStr() {
@@ -838,6 +871,7 @@ function buildHead() {
   const row = document.getElementById("head-row");
   row.textContent = "";
   row.append(h("th", { class: "rail-col", "aria-hidden": "true" }));
+  row.append(h("th", { class: "select-col" }, buildSelectAll()));
   row.append(h("th", { class: "expand-col", "aria-hidden": "true" }));
   COLUMNS.forEach(function (col) {
     if (col.key === "actions") {
@@ -860,6 +894,14 @@ function buildHead() {
     row.append(th);
   });
 }
+/* Select-all ticks only the rows currently visible — a select-all that reached
+   filtered-out rows would silently batch items the user can't see. */
+function buildSelectAll() {
+  const cb = h("input", { type: "checkbox", class: "row-check", id: "select-all",
+    "aria-label": "Select all visible items for batch implement",
+    onChange: function () { toggleSelectAllVisible(cb.checked); } });
+  return cb;
+}
 function onSort(key) {
   if (state.sortKey === key) {
     state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
@@ -873,17 +915,25 @@ function onSort(key) {
 
 /* ---------- Table body ---------- */
 function refresh() {
-  pruneExpanded();
+  pruneStale();
   syncChipStates();
   renderReadout();
   renderBody();
+  syncSelectionUI();
 }
-/* Drop expansion state for items that no longer exist (e.g. hard-deleted). */
-function pruneExpanded() {
-  if (!state.expanded.size) return;
+/* Drop expansion + selection state for items that no longer exist (e.g.
+   hard-deleted here or edited away in another session). For the batch
+   selection, also drop discarded items: a discarded id in the executor
+   batch makes the skill decline the whole run. */
+function pruneStale() {
+  if (!state.expanded.size && !state.selected.size) return;
   const ids = new Set(state.items.map(function (i) { return i.id; }));
+  const discardedIds = new Set(state.items.filter(function (i) { return i.status === "discarded"; }).map(function (i) { return i.id; }));
   Array.from(state.expanded).forEach(function (id) {
     if (!ids.has(id)) state.expanded.delete(id);
+  });
+  Array.from(state.selected).forEach(function (id) {
+    if (!ids.has(id) || discardedIds.has(id)) state.selected.delete(id);
   });
 }
 function renderReadout() {
@@ -917,6 +967,8 @@ function renderBody() {
     sortDir: state.sortDir,
   });
 
+  state.visibleIds = rows.map(function (r) { return r.id; });
+
   if (!rows.length) {
     empty.style.display = "";
     empty.textContent = "";
@@ -949,6 +1001,22 @@ function renderRow(it, byId) {
   const rail = h("td", { class: "rail-col" });
   rail.style.setProperty("--c", "var(--pr-" + it.priority + ")");
   tr.append(rail);
+
+  // batch-select checkbox. Discarded rows are unselectable: master-backlog-
+  // executor's pre-flight declines the ENTIRE batch if any id is discarded,
+  // so one slipped-in id would waste a whole run.
+  const isDiscarded = it.status === "discarded";
+  const check = h("input", { type: "checkbox", class: "row-check",
+    "aria-label": "Select " + it.id + " for batch implement",
+    disabled: isDiscarded || null,
+    title: isDiscarded ? "Discarded items can't be implemented" : null,
+    onChange: function () {
+      if (check.checked) state.selected.add(it.id);
+      else state.selected.delete(it.id);
+      syncSelectionUI();
+    } });
+  check.checked = state.selected.has(it.id) && !isDiscarded;
+  tr.append(h("td", { class: "select-cell" }, check));
 
   // disclosure toggle (keyboard-native <button>; never the whole row)
   const isOpen = state.expanded.has(it.id);
@@ -1025,6 +1093,69 @@ function renderRow(it, byId) {
   return frag;
 }
 
+/* ---------- Batch selection ---------- */
+
+/* Visible AND selectable (discarded rows can't be batched). */
+function selectableVisible() {
+  const byId = itemsById();
+  return state.visibleIds.filter(function (id) {
+    const it = byId[id];
+    return it && it.status !== "discarded";
+  });
+}
+
+/* Reflect state.selected into the Implement button and the select-all
+   tri-state. Deliberately does NOT re-render the body: a re-render on every
+   tick would collapse any open detail drawer mid-selection. */
+function syncSelectionUI() {
+  const n = state.selected.size;
+  const btn = document.getElementById("implement-btn");
+  if (btn) {
+    btn.disabled = n === 0;
+    const lab = btn.querySelector(".implement-label");
+    // Leave the label alone while it's flashing "Copied" / "Copy failed".
+    const flashing = btn.classList.contains("is-copied") || btn.classList.contains("is-failed");
+    if (lab && !flashing) lab.textContent = n ? "Implement (" + n + ")" : "Implement";
+  }
+  const all = document.getElementById("select-all");
+  if (all) {
+    const sel = selectableVisible();
+    const on = sel.filter(function (id) { return state.selected.has(id); }).length;
+    all.checked = sel.length > 0 && on === sel.length;
+    all.indeterminate = on > 0 && on < sel.length;
+    all.disabled = sel.length === 0;
+  }
+}
+
+/* Unticking clears every visible id (including any discarded row that somehow
+   carries a stale selection); ticking adds only the selectable ones. */
+function toggleSelectAllVisible(on) {
+  if (on) {
+    selectableVisible().forEach(function (id) { state.selected.add(id); });
+  } else {
+    state.visibleIds.forEach(function (id) { state.selected.delete(id); });
+  }
+  renderBody();          // every row's checkbox must re-reflect the new state
+  syncSelectionUI();
+}
+
+/* Selection is intentionally kept after copying, so the batch can be re-copied
+   without re-ticking. */
+function copySelectedImplementPrompt() {
+  const ids = sortBacklogIds(Array.from(state.selected));
+  if (!ids.length) return;
+  const btn = document.getElementById("implement-btn");
+  const lab = btn.querySelector(".implement-label");
+  copyToClipboard(implementPrompt(ids)).then(function (ok) {
+    lab.textContent = ok ? "Copied" : "Copy failed";
+    btn.classList.add(ok ? "is-copied" : "is-failed");
+    setTimeout(function () {
+      btn.classList.remove("is-copied", "is-failed");
+      syncSelectionUI();
+    }, 1400);
+  });
+}
+
 /* ---------- Row detail drawer ---------- */
 function detailRowId(id) { return "detail-" + String(id).replace(/[^\w-]/g, "_"); }
 
@@ -1076,6 +1207,42 @@ function backlogPrompt(id, mode) {
   return "Implement " + id + " using " + skill + ".";
 }
 // </backlogPrompt>
+
+// <groomPrompt>
+function groomPrompt(id, concern) {
+  // The concern is trimmed but its interior newlines are kept, so a multi-line
+  // worry pastes as written. The template's final period is skipped when the
+  // concern already ends in terminal punctuation (otherwise: "…stale..").
+  const body = String(concern == null ? "" : concern).trim();
+  const tail = /[.?!]$/.test(body) ? "" : ".";
+  return "Run the /backlog-analyzer skill for " + id +
+    ". User's concern/feedback is: " + body + tail;
+}
+// </groomPrompt>
+
+// <sortBacklogIds>
+function sortBacklogIds(ids) {
+  // Board order, not click order: compare the numeric part so BL-9 precedes
+  // BL-107 (a plain string sort would not). Ties fall back to the raw string
+  // so zero-padded variants stay deterministic.
+  const num = function (id) {
+    const m = String(id).match(/(\d+)/);
+    return m ? parseInt(m[1], 10) : 0;
+  };
+  return ids.slice().sort(function (a, b) {
+    const d = num(a) - num(b);
+    return d !== 0 ? d : String(a).localeCompare(String(b));
+  });
+}
+// </sortBacklogIds>
+
+// <implementPrompt>
+function implementPrompt(ids) {
+  // Takes the ids in the order given — the caller sorts with sortBacklogIds.
+  return "Run the /master-backlog-executor skill for these backlog ids: " +
+    ids.join(", ") + ".";
+}
+// </implementPrompt>
 
 function legacyCopy(text) {
   try {
@@ -1276,6 +1443,8 @@ function openRowMenu(item, anchor) {
     h("button", { type: "button", role: "menuitem",
       onClick: function () { closeRowMenu(); openModal(item.id); } }, "Edit"),
     h("button", { type: "button", role: "menuitem",
+      onClick: function () { closeRowMenu(); openGroomModal(item); } }, "Groom"),
+    h("button", { type: "button", role: "menuitem",
       onClick: function () { closeRowMenu(); doDiscard(item); } }, "Discard"),
     h("div", { class: "sep" }),
     h("button", { class: "danger", type: "button", role: "menuitem",
@@ -1458,6 +1627,78 @@ function closeModal() {
   modalState = null;
 }
 
+/* ---------- Groom modal ----------
+   Captures one free-text concern and copies a /backlog-analyzer prompt. The
+   skill hard-gates on a non-empty concern, so OK stays disabled until one is
+   typed. A failed clipboard write keeps the modal open — closing it would
+   throw away text the user just typed with no way to recover it. */
+function openGroomModal(item) {
+  closeRowMenu();
+  // Shares `modalState` with the edit modal so the Escape handler and
+  // #modal-root teardown work unchanged, and the two can never both be open.
+  modalState = { kind: "groom", editingId: null };
+
+  const errBox = h("div", { class: "modal-error" });
+  const concernIn = h("textarea", { class: "groom-in", id: "f-concern", required: true,
+    placeholder: "e.g. a recent fix may already have resolved this" });
+  const okBtn = h("button", { class: "btn primary", type: "submit", disabled: true,
+    onClick: function () { form.requestSubmit(); } }, "Copy prompt");
+
+  concernIn.addEventListener("input", function () {
+    okBtn.disabled = concernIn.value.trim() === "";
+  });
+  concernIn.addEventListener("keydown", function (e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      if (!okBtn.disabled) form.requestSubmit();
+    }
+  });
+
+  const form = h("form", { onSubmit: function (e) {
+      e.preventDefault();
+      submitGroom(item, concernIn, errBox);
+    } },
+    errBox,
+    h("div", { class: "field" },
+      h("label", { for: "f-concern" }, "Your concern / feedback",
+        h("span", { class: "req" }, "*")),
+      concernIn,
+      h("div", { class: "hint" },
+        "What worries you about this entry — stale, already fixed, unclear value?")));
+
+  const root = document.getElementById("modal-root");
+  root.textContent = "";
+  const scrim = h("div", { class: "scrim",
+    onClick: function (e) { if (e.target === scrim) closeModal(); } },
+    h("div", { class: "modal groom", role: "dialog", "aria-modal": "true",
+               "aria-label": "Groom " + item.id },
+      h("div", { class: "modal-head" },
+        h("div", null,
+          h("div", { class: "eyebrow" }, "Groom item"),
+          h("h2", null, item.id),
+          h("div", { class: "subject" }, item.name)),
+        h("button", { class: "x", type: "button", "aria-label": "Close",
+                      onClick: closeModal }, "✕")),
+      h("div", { class: "modal-body" }, form),
+      h("div", { class: "modal-foot" },
+        h("button", { class: "btn", type: "button", onClick: closeModal }, "Cancel"),
+        okBtn)));
+  root.append(scrim);
+  setTimeout(function () { concernIn.focus(); }, 0);
+}
+
+function submitGroom(item, concernIn, errBox) {
+  const text = groomPrompt(item.id, concernIn.value);
+  copyToClipboard(text).then(function (ok) {
+    if (ok) { closeModal(); return; }
+    errBox.textContent = "";
+    errBox.append(h("span", { class: "etitle" }, "Could not copy. "),
+      "Your browser blocked clipboard access. Copy this prompt manually:\n\n" + text);
+    errBox.classList.add("show");
+    errBox.scrollIntoView({ block: "nearest" });
+  });
+}
+
 async function saveModal(f) {
   const body = {
     name: f.nameIn.value.trim(),
@@ -1518,12 +1759,16 @@ async function boot() {
   initTheme();
 
   document.getElementById("new-btn").addEventListener("click", function () { openModal(null); });
+  document.getElementById("implement-btn")
+    .addEventListener("click", copySelectedImplementPrompt);
   const searchInput = document.getElementById("search");
   searchInput.addEventListener("input", function (e) {
     state.search = e.target.value; persistView(); renderBody();
+    // Visibility change invalidates the select-all tri-state; rebuild it.
+    syncSelectionUI();
   });
   document.getElementById("hide-blocked").addEventListener("change", function (e) {
-    state.hideBlocked = e.target.checked; persistView(); renderBody();
+    state.hideBlocked = e.target.checked; persistView(); renderBody(); syncSelectionUI();
   });
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape") { if (menuOpen) closeRowMenu(); else if (modalState) closeModal(); }

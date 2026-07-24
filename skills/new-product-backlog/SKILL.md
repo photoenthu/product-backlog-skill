@@ -217,20 +217,22 @@ python3 <skill-dir>/scripts/backlog.py serve docs/backlog/product-backlog.json
 
 If the port (8765 by default, or whatever `--port` requests) is already in use, `serve` automatically scans upward to the next free port and prints the actual URL it bound to — a busy port never crashes the editor.
 
-The editor is a self-contained page (inline CSS/JS, no CDN, theme-aware) that lists all items and supports add/edit, delete (discard by default, hard-delete as an explicit option), column sort, multi-select status/priority filter chips, and text search across id/name/description/notes. Rows are **expandable** to reveal the full description, notes, and artifact links, and it surfaces warnings when a dependency isn't yet `shipped` or when `doNotBuildBefore` is in the future.
+The editor is a self-contained page (inline CSS/JS, no CDN, theme-aware) that lists all items and supports add/edit, delete (discard by default, hard-delete as an explicit option), column sort, multi-select status/priority filter chips, text search across id/name/description/notes, and per-row checkboxes for batching several items into one execution prompt. Rows are **expandable** to reveal the full description, notes, and artifact links, and it surfaces warnings when a dependency isn't yet `shipped` or when `doNotBuildBefore` is in the future.
 
 **Artifact links** resolve two ways: a full `http(s)://` URL opens externally in a new tab; an **in-repo path** (e.g. `docs/superpowers/plans/foo.md`) is served by the editor's server from the **project root** (git toplevel of the backlog, else the repo layout's root) via a `/file` route, so it opens in the browser. `/file` accepts the path repo-root-relative, backlog-dir-relative, or absolute, and serves whichever resolves *inside* the project root; anything that escapes the root is refused.
 
 **Markdown artifacts render as formatted, read-only HTML.** A `.md`/`.markdown` artifact opens as a styled, readable page (headings, bold/italic, inline + fenced code, lists, blockquotes, tables, links) instead of raw text. The original file is never modified — it's read and rendered on the fly. Rendering is done by the bundled `scripts/mdview.py` (pure stdlib, no dependencies): it **escapes all raw HTML** in the markdown (an embedded `<script>` shows as visible text, never executes) and **sanitizes link hrefs** (only `http(s)`, in-page anchors, and in-repo relative paths — which are routed back through `/file`, so cross-doc references open in the viewer too). Everything else (HTML/SVG/XML artifacts) is still served as inert `text/plain`, so no artifact can script the editor's origin.
 
-**Execution prompts.** Every expanded item shows two one-click buttons directly under its description, which copy a ready-to-paste prompt to the clipboard:
+**Execution prompts.** The editor never invokes Claude itself — it copies a ready-to-paste prompt to the clipboard, which you paste into a session:
 
-| Button | Copies |
-|---|---|
-| **Auto** | `Implement BL-NNN using pr-from-backlog.` |
-| **Semi** | `Implement BL-NNN using semiauto-backlog-execution.` |
+| Where | Button | Copies |
+|---|---|---|
+| Expanded item, under the description | **Auto** | `Implement BL-NNN using pr-from-backlog.` |
+| Expanded item, under the description | **Semi** | `Implement BL-NNN using semiauto-backlog-execution.` |
+| Row `⋯` menu | **Groom** | `Run the /backlog-analyzer skill for BL-NNN. User's concern/feedback is: <your concern>.` |
+| Header, next to `+ New item` | **Implement** | `Run the /master-backlog-executor skill for these backlog ids: BL-AAA, BL-BBB, BL-CCC.` |
 
-`BL-NNN` is the item's own id. Paste the copied line into Claude to kick off that item's implementation.
+`BL-NNN` is the item's own id. **Groom** opens a modal that captures what worries you about the entry — required, since the analyzer skill hard-gates on a concern — and copies the prompt when you confirm; if the browser blocks clipboard access, the modal stays open with the prompt shown so nothing you typed is lost. **Implement** batches whatever rows you tick in the checkbox column: it stays disabled until something is selected, shows the running count (`Implement (3)`), and lists the ids in ascending numeric order. Selections survive search/filter changes (so you can assemble a batch across several searches) but are not remembered across a page reload. Discarded rows can't be ticked, because `master-backlog-executor`'s pre-flight gate declines an entire batch that contains one.
 
 Filter/sort/search state also persists across page refreshes (per-backlog, in `localStorage`).
 
