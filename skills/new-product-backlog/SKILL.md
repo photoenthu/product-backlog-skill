@@ -229,6 +229,7 @@ The editor is a self-contained page (inline CSS/JS, no CDN, theme-aware) that li
 |---|---|---|
 | Expanded item, under the description | **Auto** | `Implement BL-NNN using pr-from-backlog.` |
 | Expanded item, under the description | **Semi** | `Implement BL-NNN using semiauto-backlog-execution.` |
+| Expanded item, under the description | **No Research** | `Implement BL-NNN using no-research-backlog-execution.` |
 | Row `⋯` menu | **Groom** | `Run the /backlog-analyzer skill for BL-NNN. User's concern/feedback is: <your concern>.` |
 | Header, next to `+ New item` | **Implement** | `Run the /master-backlog-executor skill for these backlog ids: BL-AAA, BL-BBB, BL-CCC.` |
 

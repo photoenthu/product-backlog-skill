@@ -69,7 +69,7 @@ for (const name of ["backlogPrompt", "groomPrompt", "implementPrompt", "sortBack
   );
 }
 
-/* ---------- Auto / Semi (pre-existing contract) ---------- */
+/* ---------- Auto / Semi / No Research (pre-existing contract) ---------- */
 
 // Auto -> pr-from-backlog
 assert.equal(
@@ -83,6 +83,12 @@ assert.equal(
   "Implement BL-001 using semiauto-backlog-execution.",
 );
 
+// No Research -> no-research-backlog-execution
+assert.equal(
+  backlogPrompt("BL-001", "none"),
+  "Implement BL-001 using no-research-backlog-execution.",
+);
+
 // The id is substituted, not hardcoded.
 assert.equal(
   backlogPrompt("BL-042", "auto"),
@@ -92,6 +98,10 @@ assert.equal(
   backlogPrompt("BL-137", "semi"),
   "Implement BL-137 using semiauto-backlog-execution.",
 );
+assert.equal(
+  backlogPrompt("BL-88", "none"),
+  "Implement BL-88 using no-research-backlog-execution.",
+);
 
 // Ids wider than 3 digits still round-trip verbatim.
 assert.equal(
@@ -99,15 +109,41 @@ assert.equal(
   "Implement BL-1000 using pr-from-backlog.",
 );
 
-// Both prompts end with a period and name exactly one skill.
-for (const mode of ["auto", "semi"]) {
+// Every prompt ends with a period and names exactly one skill.
+for (const mode of ["auto", "semi", "none"]) {
   const out = backlogPrompt("BL-007", mode);
   assert.ok(out.endsWith("."), `prompt should end with a period: ${out}`);
   assert.ok(out.startsWith("Implement BL-007 using "), `unexpected prefix: ${out}`);
 }
 
-// The two modes must not produce the same prompt.
-assert.notEqual(backlogPrompt("BL-001", "auto"), backlogPrompt("BL-001", "semi"));
+// No two modes may produce the same prompt.
+const execPrompts = ["auto", "semi", "none"].map((m) => backlogPrompt("BL-001", m));
+assert.equal(new Set(execPrompts).size, 3, "each exec mode needs its own skill");
+
+// An unknown mode must not fabricate a skill name (`skills[mode]` on a
+// prototype key like "constructor" would otherwise stringify a function into
+// the prompt). It falls back to auto's skill.
+for (const bogus of ["constructor", "toString", "", undefined]) {
+  assert.equal(
+    backlogPrompt("BL-001", bogus),
+    "Implement BL-001 using pr-from-backlog.",
+    `unknown mode ${JSON.stringify(bogus)} should fall back to auto`,
+  );
+}
+
+// Each button in the editor's EXEC_MODES list must map to a real mode: the
+// labels and modes are wired here, so a typo'd mode would silently copy the
+// auto prompt from a button labelled something else.
+const modesBlock = scriptSource.match(/const EXEC_MODES = \[([\s\S]*?)\];/);
+assert.ok(modesBlock, "EXEC_MODES list not found in editor.html");
+const wiredModes = [...modesBlock[1].matchAll(/mode:\s*"([^"]+)"/g)].map((m) => m[1]);
+assert.deepEqual(
+  wiredModes,
+  ["auto", "semi", "none"],
+  "EXEC_MODES must wire exactly the three known modes, in button order",
+);
+const wiredLabels = [...modesBlock[1].matchAll(/label:\s*"([^"]+)"/g)].map((m) => m[1]);
+assert.deepEqual(wiredLabels, ["Auto", "Semi", "No Research"]);
 
 /* ---------- Groom -> backlog-analyzer ---------- */
 

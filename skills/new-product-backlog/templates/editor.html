@@ -423,7 +423,7 @@ tr.detail-row > td.detail-cell { padding: 0; }
 /* Copy-to-clipboard execution prompts, directly under the description. */
 .exec-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .exec-btn {
-  display: inline-flex; align-items: center; gap: 7px;
+  display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
   font: inherit; font-size: 12px; font-weight: 600; line-height: 1;
   padding: 6px 11px; border-radius: 8px; cursor: pointer;
   border: 1px solid var(--border); background: var(--surface); color: var(--accent);
@@ -1188,7 +1188,8 @@ function buildDetailRow(it, byId, detailId) {
   rail.style.setProperty("--c", "var(--pr-" + it.priority + ")");
   tr.append(rail);
 
-  // The Auto / Semi copy-prompt buttons live directly below the description.
+  // The Auto / Semi / No Research copy-prompt buttons live directly below the
+  // description.
   const descBlock = detailBlock("Description", it.description, "No description.", "detail-desc");
   descBlock.append(detailActions(it));
 
@@ -1203,7 +1204,16 @@ function buildDetailRow(it, byId, detailId) {
 
 // <backlogPrompt>
 function backlogPrompt(id, mode) {
-  const skill = mode === "auto" ? "pr-from-backlog" : "semiauto-backlog-execution";
+  // One executing skill per mode. Kept as an own-property lookup (not a
+  // ternary chain) so adding a mode is a one-line change; an unknown mode
+  // falls back to auto rather than naming a skill that doesn't exist.
+  const skills = {
+    auto: "pr-from-backlog",
+    semi: "semiauto-backlog-execution",
+    none: "no-research-backlog-execution",
+  };
+  const skill = Object.prototype.hasOwnProperty.call(skills, mode)
+    ? skills[mode] : skills.auto;
   return "Implement " + id + " using " + skill + ".";
 }
 // </backlogPrompt>
@@ -1272,10 +1282,11 @@ function copyToClipboard(text) {
   return Promise.resolve(legacyCopy(text));
 }
 
-// Two one-click prompts per item, sitting directly under the description.
+// Three one-click prompts per item, sitting directly under the description.
 const EXEC_MODES = [
   { label: "Auto", mode: "auto" },
   { label: "Semi", mode: "semi" },
+  { label: "No Research", mode: "none" },
 ];
 
 function detailActions(it) {
