@@ -634,6 +634,10 @@ tr.detail-row > td.detail-cell { padding: 0; }
         <input type="checkbox" id="hide-blocked">
         <span>Hide Blocked</span>
       </label>
+      <label class="toggle" for="hide-embargo">
+        <input type="checkbox" id="hide-embargo">
+        <span>Hide Embargo</span>
+      </label>
     </div>
   </div>
 
@@ -658,10 +662,26 @@ function applyFilters(items, opts) {
   const sortDir = opts.sortDir === "desc" ? "desc" : "asc";
   const PRIORITY_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
 
+  /* Embargo is a per-item date gate — no cross-item lookup, so it needs no
+     pre-pass. `today` is injected by the caller (renderBody passes todayStr())
+     and only computed here as a fallback: this block is eval'd standalone by
+     tests/editor_filters.test.mjs and cannot reach todayStr(). Dates are
+     schema-validated YYYY-MM-DD, so a lexicographic ">" is chronological. */
+  const hideEmbargo = opts.hideEmbargo === true;
+  let today = opts.today;
+  if (!today) {
+    const now = new Date();
+    const pad = function (n) { return String(n).padStart(2, "0"); };
+    today = now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate());
+  }
+  const isEmbargoed = function (it) {
+    return !!it.doNotBuildBefore && it.doNotBuildBefore > today;
+  };
+
   /* Blockedness is resolved against the FULL input list, before any filtering,
      so a dependency hidden by the status/search filters still blocks its
      dependents. Mirrors warningsFor()'s "blocked" rule: a dep that is missing
-     or not shipped blocks. Embargo is not part of this filter. */
+     or not shipped blocks. Embargo is a separate, independent toggle. */
   const hideBlocked = opts.hideBlocked === true;
   const statusById = {};
   items.forEach(function (it) { statusById[it.id] = it.status; });
@@ -671,6 +691,7 @@ function applyFilters(items, opts) {
 
   let out = items.filter(function (it) {
     if (hideBlocked && isBlocked(it)) return false;
+    if (hideEmbargo && isEmbargoed(it)) return false;
     if (statuses.length && statuses.indexOf(it.status) === -1) return false;
     if (priorities.length && priorities.indexOf(it.priority) === -1) return false;
     if (search) {
@@ -761,6 +782,7 @@ const state = {
   statuses: [],
   priorities: [],
   hideBlocked: false,    // when true, drop items waiting on an unshipped dependency
+  hideEmbargo: false,    // when true, drop items whose doNotBuildBefore is still in the future
   sortKey: "id",
   sortDir: "asc",
   expanded: new Set(),   // ids of rows whose detail drawer is open (survives re-render)
@@ -963,6 +985,8 @@ function renderBody() {
     statuses: state.statuses,
     priorities: state.priorities,
     hideBlocked: state.hideBlocked,
+    hideEmbargo: state.hideEmbargo,
+    today: todayStr(),
     sortKey: state.sortKey,
     sortDir: state.sortDir,
   });
@@ -1386,8 +1410,10 @@ function clearFilters() {
   state.statuses = [];
   state.priorities = [];
   state.hideBlocked = false;
+  state.hideEmbargo = false;
   document.getElementById("search").value = "";
   document.getElementById("hide-blocked").checked = false;
+  document.getElementById("hide-embargo").checked = false;
   persistView();
   refresh();
 }
@@ -1412,6 +1438,7 @@ function persistView() {
       statuses: state.statuses,
       priorities: state.priorities,
       hideBlocked: state.hideBlocked,
+      hideEmbargo: state.hideEmbargo,
       sortKey: state.sortKey,
       sortDir: state.sortDir,
     }));
@@ -1439,6 +1466,7 @@ function restoreView() {
     });
   }
   if (typeof saved.hideBlocked === "boolean") state.hideBlocked = saved.hideBlocked;
+  if (typeof saved.hideEmbargo === "boolean") state.hideEmbargo = saved.hideEmbargo;
   if (sortableKeys().indexOf(saved.sortKey) !== -1) state.sortKey = saved.sortKey;
   if (saved.sortDir === "asc" || saved.sortDir === "desc") state.sortDir = saved.sortDir;
 }
@@ -1781,6 +1809,9 @@ async function boot() {
   document.getElementById("hide-blocked").addEventListener("change", function (e) {
     state.hideBlocked = e.target.checked; persistView(); renderBody(); syncSelectionUI();
   });
+  document.getElementById("hide-embargo").addEventListener("change", function (e) {
+    state.hideEmbargo = e.target.checked; persistView(); renderBody(); syncSelectionUI();
+  });
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape") { if (menuOpen) closeRowMenu(); else if (modalState) closeModal(); }
   });
@@ -1816,6 +1847,7 @@ async function boot() {
   restoreView();
   searchInput.value = state.search;
   document.getElementById("hide-blocked").checked = state.hideBlocked;
+  document.getElementById("hide-embargo").checked = state.hideEmbargo;
 
   buildChips();
   buildHead();
