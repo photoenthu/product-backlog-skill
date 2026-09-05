@@ -634,6 +634,10 @@ tr.detail-row > td.detail-cell { padding: 0; }
         <input type="checkbox" id="hide-blocked">
         <span>Hide Blocked</span>
       </label>
+      <label class="toggle" for="hide-embargo">
+        <input type="checkbox" id="hide-embargo">
+        <span>Hide Embargo</span>
+      </label>
     </div>
   </div>
 
@@ -778,6 +782,7 @@ const state = {
   statuses: [],
   priorities: [],
   hideBlocked: false,    // when true, drop items waiting on an unshipped dependency
+  hideEmbargo: false,    // when true, drop items whose doNotBuildBefore is still in the future
   sortKey: "id",
   sortDir: "asc",
   expanded: new Set(),   // ids of rows whose detail drawer is open (survives re-render)
@@ -980,6 +985,8 @@ function renderBody() {
     statuses: state.statuses,
     priorities: state.priorities,
     hideBlocked: state.hideBlocked,
+    hideEmbargo: state.hideEmbargo,
+    today: todayStr(),
     sortKey: state.sortKey,
     sortDir: state.sortDir,
   });
@@ -1403,8 +1410,10 @@ function clearFilters() {
   state.statuses = [];
   state.priorities = [];
   state.hideBlocked = false;
+  state.hideEmbargo = false;
   document.getElementById("search").value = "";
   document.getElementById("hide-blocked").checked = false;
+  document.getElementById("hide-embargo").checked = false;
   persistView();
   refresh();
 }
@@ -1429,6 +1438,7 @@ function persistView() {
       statuses: state.statuses,
       priorities: state.priorities,
       hideBlocked: state.hideBlocked,
+      hideEmbargo: state.hideEmbargo,
       sortKey: state.sortKey,
       sortDir: state.sortDir,
     }));
@@ -1456,6 +1466,7 @@ function restoreView() {
     });
   }
   if (typeof saved.hideBlocked === "boolean") state.hideBlocked = saved.hideBlocked;
+  if (typeof saved.hideEmbargo === "boolean") state.hideEmbargo = saved.hideEmbargo;
   if (sortableKeys().indexOf(saved.sortKey) !== -1) state.sortKey = saved.sortKey;
   if (saved.sortDir === "asc" || saved.sortDir === "desc") state.sortDir = saved.sortDir;
 }
@@ -1798,6 +1809,9 @@ async function boot() {
   document.getElementById("hide-blocked").addEventListener("change", function (e) {
     state.hideBlocked = e.target.checked; persistView(); renderBody(); syncSelectionUI();
   });
+  document.getElementById("hide-embargo").addEventListener("change", function (e) {
+    state.hideEmbargo = e.target.checked; persistView(); renderBody(); syncSelectionUI();
+  });
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape") { if (menuOpen) closeRowMenu(); else if (modalState) closeModal(); }
   });
@@ -1833,6 +1847,7 @@ async function boot() {
   restoreView();
   searchInput.value = state.search;
   document.getElementById("hide-blocked").checked = state.hideBlocked;
+  document.getElementById("hide-embargo").checked = state.hideEmbargo;
 
   buildChips();
   buildHead();

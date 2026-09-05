@@ -492,15 +492,18 @@ Expected: all green.
 This is the only verification the DOM wiring gets — actually run it, do not skip.
 
 ```bash
-cd "$(mktemp -d)" && git init -q . && \
-python3 /Users/subhadipchatterjee/Documents/Projects/product-backlog-skill/skills/new-product-backlog/scripts/backlog.py \
-  add --name "Future work" --dnbb 2099-01-01 && \
-python3 /Users/subhadipchatterjee/Documents/Projects/product-backlog-skill/skills/new-product-backlog/scripts/backlog.py \
-  add --name "Ready now" && \
-python3 /Users/subhadipchatterjee/Documents/Projects/product-backlog-skill/skills/new-product-backlog/scripts/backlog.py \
-  add --name "Gated today" --dnbb "$(date +%F)" && \
-python3 /Users/subhadipchatterjee/Documents/Projects/product-backlog-skill/skills/new-product-backlog/scripts/backlog.py serve
+SK=/Users/subhadipchatterjee/Documents/Projects/product-backlog-skill/skills/new-product-backlog/scripts/backlog.py
+D="$(mktemp -d)"; cd "$D"; git init -q .
+F="$D/docs/backlog/product-backlog.json"     # `add` bootstraps the file + dirs
+python3 "$SK" add "$F" --name "Future work" --dnbb 2099-01-01
+python3 "$SK" add "$F" --name "Ready now"
+python3 "$SK" add "$F" --name "Gated today" --dnbb "$(date +%F)"
+python3 "$SK" add "$F" --name "Blocked one" --depends BL-001
+python3 "$SK" serve "$F"
 ```
+
+Note the CLI signature: `add` takes the backlog path as a **positional**
+argument, and the dependency flag is `--depends` (not `--deps`).
 
 Open the printed URL and confirm:
 1. `Hide Embargo` renders immediately right of `Hide Blocked`, same pill styling.
