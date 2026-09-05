@@ -86,4 +86,79 @@ out = applyFilters(
 );
 assert.deepEqual(out.map((i) => i.id), ["BL-010"]);
 
+/* ---------- hideEmbargo ---------- *
+   An item is embargoed when doNotBuildBefore is set AND strictly after the
+   reference date — the same rule the row's "Embargo" badge uses. A date equal
+   to today is NOT embargoed: the gate expires that morning, so the item is
+   startable and stays visible. Dependencies are deliberately not part of this
+   filter. `today` is injected via opts so the boundary is testable without
+   mocking the clock. */
+const TODAY = "2026-09-05";
+const emb = [
+  { id: "BL-101", name: "Now", status: "new", priority: "high", doNotBuildBefore: null },
+  { id: "BL-102", name: "NoField", status: "new", priority: "high" },
+  { id: "BL-103", name: "Past", status: "new", priority: "high", doNotBuildBefore: "2026-09-04" },
+  { id: "BL-104", name: "Today", status: "new", priority: "high", doNotBuildBefore: "2026-09-05" },
+  { id: "BL-105", name: "Tomorrow", status: "new", priority: "high", doNotBuildBefore: "2026-09-06" },
+  { id: "BL-106", name: "NextYear", status: "new", priority: "high", doNotBuildBefore: "2027-01-01" },
+];
+const embBase = { ...base, today: TODAY };
+
+// Default (absent / false) keeps every item -> unchecked is a no-op.
+out = applyFilters(emb, embBase);
+assert.deepEqual(out.map((i) => i.id),
+  ["BL-101", "BL-102", "BL-103", "BL-104", "BL-105", "BL-106"]);
+out = applyFilters(emb, { ...embBase, hideEmbargo: false });
+assert.equal(out.length, 6);
+
+// Checked drops only strictly-future dates. null, a missing field, a past date,
+// and today's date all survive.
+out = applyFilters(emb, { ...embBase, hideEmbargo: true });
+assert.deepEqual(out.map((i) => i.id), ["BL-101", "BL-102", "BL-103", "BL-104"]);
+
+// The boundary, asserted on its own so a regression names itself.
+out = applyFilters(
+  [{ id: "BL-104", name: "Today", status: "new", priority: "high", doNotBuildBefore: TODAY }],
+  { ...embBase, hideEmbargo: true },
+);
+assert.deepEqual(out.map((i) => i.id), ["BL-104"], "a date equal to today is not embargoed");
+
+// Composes with search and with the status filter.
+out = applyFilters(emb, { ...embBase, hideEmbargo: true, search: "past" });
+assert.deepEqual(out.map((i) => i.id), ["BL-103"]);
+out = applyFilters(
+  [
+    { id: "BL-110", name: "A", status: "new", priority: "high", doNotBuildBefore: "2027-01-01" },
+    { id: "BL-111", name: "B", status: "shipped", priority: "high", doNotBuildBefore: null },
+    { id: "BL-112", name: "C", status: "new", priority: "high", doNotBuildBefore: null },
+  ],
+  { ...embBase, hideEmbargo: true, statuses: ["new"] },
+);
+assert.deepEqual(out.map((i) => i.id), ["BL-112"]);
+
+/* The two hide toggles are independent and compose as AND. */
+const both = [
+  { id: "BL-201", name: "Clean", status: "new", priority: "high", dependencies: [], doNotBuildBefore: null },
+  { id: "BL-202", name: "OnlyEmbargo", status: "new", priority: "high", dependencies: [], doNotBuildBefore: "2027-01-01" },
+  { id: "BL-203", name: "OnlyBlocked", status: "new", priority: "high", dependencies: ["BL-299"], doNotBuildBefore: null },
+  { id: "BL-204", name: "BothHolds", status: "new", priority: "high", dependencies: ["BL-299"], doNotBuildBefore: "2027-01-01" },
+];
+out = applyFilters(both, { ...embBase, hideEmbargo: true });
+assert.deepEqual(out.map((i) => i.id), ["BL-201", "BL-203"]);
+out = applyFilters(both, { ...embBase, hideBlocked: true });
+assert.deepEqual(out.map((i) => i.id), ["BL-201", "BL-202"]);
+out = applyFilters(both, { ...embBase, hideBlocked: true, hideEmbargo: true });
+assert.deepEqual(out.map((i) => i.id), ["BL-201"]);
+
+// Omitting opts.today falls back to the real current date. A date far in the
+// past is never embargoed and one far in the future always is, whatever "now" is.
+out = applyFilters(
+  [
+    { id: "BL-301", name: "LongPast", status: "new", priority: "high", doNotBuildBefore: "1970-01-01" },
+    { id: "BL-302", name: "LongFuture", status: "new", priority: "high", doNotBuildBefore: "9999-12-31" },
+  ],
+  { ...base, hideEmbargo: true },
+);
+assert.deepEqual(out.map((i) => i.id), ["BL-301"]);
+
 console.log("editor_filters.test.mjs: all assertions passed");
