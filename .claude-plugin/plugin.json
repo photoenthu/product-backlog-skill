@@ -1,7 +1,7 @@
 {
   "name": "product-backlog",
   "description": "Bundles two Product Backlog skills: the original markdown-table backlog (docs/backlog/product-backlog.md) with a self-contained HTML dashboard, and a new JSON-backed backlog (docs/backlog/product-backlog.json) governed by a strict JSON Schema, mutated only through a deterministic Python CLI, with a live localhost HTML editor. Both analyze each Claude session for shipped, in-progress, and pending work. The JSON-backed CLI is also callable as a subprocess from other skills/projects (find, default-path, --json, auto-init on add) for cross-skill backlog integration.",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "author": {
     "name": "photoenthu"
   },
